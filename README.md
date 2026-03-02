@@ -138,6 +138,40 @@ npm run dev
 Open:
 - `http://localhost:3000`
 
+## Updating Eggent
+
+Before updating, back up:
+- `.env`
+- `data/`
+
+If you installed with the one-command installer, run the same command again:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh | bash
+```
+
+It will update the repo in `~/.eggent` (or `EGGENT_INSTALL_DIR` if customized), then rebuild and restart Docker deployment.
+
+If you run Eggent from this repo with Docker:
+
+```bash
+git pull --ff-only origin main
+npm run setup:docker
+```
+
+If you run Eggent from this repo in local production mode (Node + npm):
+
+```bash
+git pull --ff-only origin main
+npm run setup:local
+```
+
+Quick post-update check:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
 ## Runtime Scripts
 
 Defined in `package.json`:
