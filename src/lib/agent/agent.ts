@@ -2,6 +2,7 @@ import {
   streamText,
   generateText,
   stepCountIs,
+  hasToolCall,
   type ModelMessage,
   type ToolExecutionOptions,
   type ToolSet,
@@ -690,7 +691,7 @@ export async function runAgent(options: {
     system: systemPrompt,
     messages,
     tools,
-    stopWhen: stepCountIs(MAX_TOOL_STEPS_PER_TURN),
+    stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
     temperature: settings.chatModel.temperature ?? 0.7,
     maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
     onFinish: async (event) => {
@@ -869,7 +870,7 @@ export async function runAgentText(options: {
       system: systemPrompt,
       messages,
       tools,
-      stopWhen: stepCountIs(MAX_TOOL_STEPS_PER_TURN),
+      stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
       temperature: settings.chatModel.temperature ?? 0.7,
       maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
     });
@@ -1000,7 +1001,7 @@ export async function runSubordinateAgent(options: {
       system: systemPrompt,
       messages,
       tools,
-      stopWhen: stepCountIs(MAX_TOOL_STEPS_SUBORDINATE),
+      stopWhen: [stepCountIs(MAX_TOOL_STEPS_SUBORDINATE), hasToolCall("response")],
       temperature: settings.chatModel.temperature ?? 0.7,
       maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
     });

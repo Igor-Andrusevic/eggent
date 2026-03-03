@@ -145,6 +145,7 @@ from lib import (
     schema,
     score,
     ui,
+    websearch,
     xai_x,
     youtube_yt,
 )
