@@ -23,7 +23,7 @@ The app runs as a Next.js service and stores runtime state on disk (`./data`).
 ## Releases
 
 - Latest release snapshot: [0.1.2 - Dark Theme and Python Recovery](./docs/releases/0.1.2-dark-theme-python-recovery.md)
-- GitHub release body (ready to paste): [v0.1.2](./docs/releases/github-v0.1.2.md)
+- GitHub release body : [v0.1.2](./docs/releases/github-v0.1.2.md)
 - Release archive: [docs/releases/README.md](./docs/releases/README.md)
 
 ## Contributing and Support
