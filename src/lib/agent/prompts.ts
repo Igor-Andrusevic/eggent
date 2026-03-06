@@ -114,7 +114,7 @@ export async function buildSystemPrompt(options: {
       `\n## Tool Loop Safety\n` +
       `- After a failed tool call, do not repeat the same tool with identical arguments.\n` +
       `- Use the tool's error details to change parameters before retrying.\n` +
-      `- For skill tools (load_skill/load_skill_resource/create_skill/update_skill/delete_skill/write_skill_file), use exact skill names and valid paths.\n` +
+      `- For skill tools (load_skill/load_skill_resource/install_skill_from_github/create_skill/update_skill/delete_skill/write_skill_file), use exact skill names and valid paths.\n` +
       `- If two corrected attempts still fail, report the blocker to the user instead of retrying endlessly.`
     );
   }

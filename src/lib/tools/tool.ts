@@ -30,6 +30,7 @@ import {
   loadProjectSkillsMetadata,
   loadSkillInstructions,
   createSkill,
+  installSkillFromGitHub,
   updateSkill,
   deleteSkill,
   writeSkillFile,
@@ -39,6 +40,9 @@ import {
 
 const SKILL_RESOURCE_LIST_LIMIT = 60;
 const SKILL_RESOURCE_READ_MAX_CHARS = 24000;
+const SKILL_REQUIRED_AUTOLOAD_MAX_FILES = 4;
+const SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_TOTAL = 50000;
+const SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_PER_FILE = 18000;
 const CODE_EXEC_MAX_CHARS = 20000;
 const CODE_EXEC_MAX_LINES = 800;
 const TEXT_FILE_READ_MAX_CHARS = 30000;
@@ -229,36 +233,46 @@ function parseLocalMarkdownLinks(markdown: string): string[] {
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(markdown)) !== null) {
-    const rawTarget = match[1].trim();
-    if (!rawTarget) continue;
-
-    let target = rawTarget;
-    if (target.startsWith("<") && target.endsWith(">")) {
-      target = target.slice(1, -1).trim();
-    }
-
-    const spaceQuoteIdx = target.search(/\s+["']/);
-    if (spaceQuoteIdx >= 0) {
-      target = target.slice(0, spaceQuoteIdx).trim();
-    }
-
-    const lower = target.toLowerCase();
-    if (
-      lower.startsWith("http://") ||
-      lower.startsWith("https://") ||
-      lower.startsWith("mailto:") ||
-      lower.startsWith("#")
-    ) {
-      continue;
-    }
-
-    const cleaned = target.split("#")[0].split("?")[0].trim();
+    const cleaned = normalizeLocalMarkdownLinkTarget(match[1] ?? "");
     if (!cleaned || seen.has(cleaned)) continue;
     seen.add(cleaned);
     result.push(cleaned);
   }
 
   return result;
+}
+
+function normalizeLocalMarkdownLinkTarget(rawTarget: string): string | null {
+  const trimmed = rawTarget.trim();
+  if (!trimmed) return null;
+
+  let target = trimmed;
+  if (target.startsWith("<") && target.endsWith(">")) {
+    target = target.slice(1, -1).trim();
+  }
+
+  const spaceQuoteIdx = target.search(/\s+["']/);
+  if (spaceQuoteIdx >= 0) {
+    target = target.slice(0, spaceQuoteIdx).trim();
+  }
+
+  const lower = target.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("#")
+  ) {
+    return null;
+  }
+
+  const cleaned = target.split("#")[0].split("?")[0].trim();
+  return cleaned || null;
+}
+
+function parseRequiredSkillResourceLinks(markdown: string): string[] {
+  // Contract: every local markdown link in SKILL.md is treated as required context.
+  return parseLocalMarkdownLinks(markdown);
 }
 
 function inferLanguageFromPath(filePath: string): string {
@@ -391,6 +405,105 @@ async function listSkillResourcePaths(
   }
 
   return result;
+}
+
+interface RequiredSkillResourceContent {
+  relativePath: string;
+  language: string;
+  content: string;
+  truncated: boolean;
+}
+
+type RequiredResourceSkipReason =
+  | "not_found"
+  | "read_error"
+  | "file_limit"
+  | "char_limit";
+
+interface RequiredSkillResourceSkip {
+  relativePath: string;
+  reason: RequiredResourceSkipReason;
+}
+
+interface RequiredSkillResourceAutoloadReport {
+  detectedLinks: string[];
+  loaded: RequiredSkillResourceContent[];
+  skipped: RequiredSkillResourceSkip[];
+}
+
+async function loadRequiredSkillResources(
+  skillDir: string,
+  skillBody: string
+): Promise<RequiredSkillResourceAutoloadReport> {
+  const requiredLinks = parseRequiredSkillResourceLinks(skillBody);
+  const loaded: RequiredSkillResourceContent[] = [];
+  const skipped: RequiredSkillResourceSkip[] = [];
+  let totalChars = 0;
+
+  for (const link of requiredLinks) {
+    const normalizedLink = link.replace(/\\/g, "/");
+    if (loaded.length >= SKILL_REQUIRED_AUTOLOAD_MAX_FILES) {
+      skipped.push({ relativePath: normalizedLink, reason: "file_limit" });
+      continue;
+    }
+    if (totalChars >= SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_TOTAL) {
+      skipped.push({ relativePath: normalizedLink, reason: "char_limit" });
+      continue;
+    }
+
+    const fullPath = await resolveSkillLocalFile(skillDir, link);
+    if (!fullPath) {
+      skipped.push({ relativePath: normalizedLink, reason: "not_found" });
+      continue;
+    }
+
+    let raw: string;
+    try {
+      raw = await fs.readFile(fullPath, "utf-8");
+    } catch {
+      skipped.push({ relativePath: normalizedLink, reason: "read_error" });
+      continue;
+    }
+
+    const remaining = SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_TOTAL - totalChars;
+    const maxForFile = Math.min(SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_PER_FILE, remaining);
+    if (maxForFile <= 0) {
+      skipped.push({ relativePath: normalizedLink, reason: "char_limit" });
+      continue;
+    }
+
+    const truncated = raw.length > maxForFile;
+    const content = truncated ? raw.slice(0, maxForFile) : raw;
+    totalChars += content.length;
+
+    loaded.push({
+      relativePath: path.relative(skillDir, fullPath).replaceAll("\\", "/"),
+      language: inferLanguageFromPath(fullPath),
+      content,
+      truncated,
+    });
+  }
+
+  return {
+    detectedLinks: requiredLinks,
+    loaded,
+    skipped,
+  };
+}
+
+function formatRequiredResourceSkipReason(reason: RequiredResourceSkipReason): string {
+  switch (reason) {
+    case "not_found":
+      return "not found";
+    case "read_error":
+      return "read error";
+    case "file_limit":
+      return `file limit (${SKILL_REQUIRED_AUTOLOAD_MAX_FILES})`;
+    case "char_limit":
+      return `char limit (${SKILL_REQUIRED_AUTOLOAD_MAX_CHARS_TOTAL})`;
+    default:
+      return reason;
+  }
 }
 
 /**
@@ -1295,13 +1408,60 @@ export function createAgentTools(
           skill.skillDir,
           skill.body
         );
+        const requiredResourceReport = await loadRequiredSkillResources(
+          skill.skillDir,
+          skill.body
+        );
+        const requiredResources = requiredResourceReport.loaded;
         const parts = [
           `# Skill: ${skill.name}\n${skill.description}\n\n## Instructions\n\n${skill.body}`,
         ];
+        parts.push(
+          "## Required Resource Link Scan\n" +
+          `Detected local links in SKILL.md: ${requiredResourceReport.detectedLinks.length}\n` +
+          `Auto-loaded: ${requiredResources.length}\n` +
+          `Skipped: ${requiredResourceReport.skipped.length}`
+        );
+        if (requiredResourceReport.detectedLinks.length > 0) {
+          parts.push(
+            "### Detected Links\n" +
+            requiredResourceReport.detectedLinks.map((p) => `- \`${p}\``).join("\n")
+          );
+        }
+        if (requiredResources.length > 0) {
+          parts.push(
+            "## Auto-loaded Required Skill Resources\n" +
+            "These files are auto-loaded because SKILL.md contains local markdown links (`[...](...)`). Linked files are treated as required context before execution."
+          );
+          for (const resource of requiredResources) {
+            parts.push(
+              [
+                `### ${resource.relativePath}`,
+                `\`\`\`${resource.language}`,
+                resource.content,
+                "```",
+                resource.truncated ? "[Truncated: file too large]" : "",
+              ]
+                .filter(Boolean)
+                .join("\n")
+            );
+          }
+        }
+        if (requiredResourceReport.skipped.length > 0) {
+          parts.push(
+            "### Skipped Required Links\n" +
+            requiredResourceReport.skipped
+              .map(
+                (item) =>
+                  `- \`${item.relativePath}\` — ${formatRequiredResourceSkipReason(item.reason)}`
+              )
+              .join("\n")
+          );
+        }
         if (resourcePaths.length > 0) {
           parts.push(
             "## Available Skill Resources\n" +
-            "Use `load_skill_resource` to load one specific file when the instructions need it.\n\n" +
+            "Required resources may already be auto-loaded above. Use `load_skill_resource` for any additional file needed by the workflow.\n\n" +
             resourcePaths.map((p) => `- \`${p}\``).join("\n")
           );
         } else {
@@ -1372,6 +1532,34 @@ export function createAgentTools(
           content,
           "```",
         ].join("\n");
+      },
+    });
+
+    tools.install_skill_from_github = tool({
+      description:
+        "Install an existing skill from a GitHub URL into the current project. Use this when the user provides a github.com link and asks to install/import a skill. This copies files recursively from the linked path and preserves folder structure.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .describe(
+            "GitHub URL to a skill directory or file, for example https://github.com/owner/repo/tree/main/skills/my-skill"
+          ),
+        skill_name: z
+          .string()
+          .optional()
+          .describe(
+            "Optional override for installed skill name (lowercase letters, numbers, hyphens)."
+          ),
+      }),
+      execute: async ({ url, skill_name }) => {
+        const result = await installSkillFromGitHub(context.projectId!, {
+          url,
+          skill_name,
+        });
+        if (!result.success) {
+          return `Failed to install skill from GitHub: ${result.error}`;
+        }
+        return `Skill "${result.skillName}" installed successfully at ${result.skillDir} from ${url} (ref: ${result.sourceRef}${result.sourcePath ? `, path: ${result.sourcePath}` : ""}, files: ${result.filesCopied}).`;
       },
     });
 

@@ -1,5 +1,8 @@
 Use this tool when the user asks to **create**, **add**, or **write** a skill for the current project.
 
+Do **not** use this tool to import/install a skill from a URL, repository, or existing folder.
+If the user provides a GitHub link and asks to install/import a skill, use **install_skill_from_github** instead.
+
 **Before calling create_skill:**
 
 1. **skill_name** — Must follow Agent Skills spec:
