@@ -314,8 +314,13 @@ function createTransport(
       cwd: config.cwd,
     });
   }
+  // Merge custom headers with required Accept header for StreamableHTTP
+  const headers: HeadersInit = {
+    'Accept': 'application/json, text/event-stream',
+    ...config.headers,
+  };
   return new StreamableHTTPClientTransport(new URL(config.url), {
-    requestInit: config.headers ? { headers: config.headers } : undefined,
+    requestInit: { headers },
   });
 }
 
