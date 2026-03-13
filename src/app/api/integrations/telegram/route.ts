@@ -28,6 +28,12 @@ import {
   saveExternalSession,
 } from "@/lib/storage/external-session-store";
 import { getAllProjects } from "@/lib/storage/project-store";
+import {
+  canUserAccessProject,
+  getAccessibleProjects,
+  getFirstAccessibleProject,
+  ensureUserHasProjectAccess,
+} from "@/lib/storage/project-access-store";
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_FILE_MAX_BYTES = 30 * 1024 * 1024;
@@ -159,10 +165,12 @@ function chatBelongsToProject(
 
 async function ensureTelegramExternalChatContext(params: {
   sessionId: string;
+  userId: string;
   defaultProjectId?: string;
 }): Promise<TelegramExternalChatContext> {
   const { session, resolvedProjectId } = await resolveTelegramProjectContext({
     sessionId: params.sessionId,
+    userId: params.userId,
     defaultProjectId: params.defaultProjectId,
   });
   const projectKey = contextKey(resolvedProjectId);
@@ -199,25 +207,46 @@ async function ensureTelegramExternalChatContext(params: {
 
 async function resolveTelegramProjectContext(params: {
   sessionId: string;
+  userId: string;
   defaultProjectId?: string;
 }): Promise<TelegramResolvedProjectContext> {
   const session = await getOrCreateExternalSession(params.sessionId);
-  const projects = await getAllProjects();
-  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const allProjects = await getAllProjects();
+  const accessibleProjects = await getAccessibleProjects(allProjects, params.userId);
+  const projectById = new Map(accessibleProjects.map((project) => [project.id, project]));
 
   let resolvedProjectId: string | undefined;
   const explicitProjectId = params.defaultProjectId?.trim() || "";
+
   if (explicitProjectId) {
-    if (!projectById.has(explicitProjectId)) {
-      throw new Error(`Project "${explicitProjectId}" not found`);
+    // Check if user has access to the explicitly requested project
+    const hasAccess = await canUserAccessProject(params.userId, explicitProjectId);
+    if (!hasAccess) {
+      const firstAccessible = await getFirstAccessibleProject(allProjects, params.userId);
+      if (!firstAccessible) {
+        throw new Error("Нет доступных проектов");
+      }
+      resolvedProjectId = firstAccessible.id;
+      session.activeProjectId = firstAccessible.id;
+    } else {
+      resolvedProjectId = explicitProjectId;
+      session.activeProjectId = explicitProjectId;
     }
-    resolvedProjectId = explicitProjectId;
-    session.activeProjectId = explicitProjectId;
-  } else if (session.activeProjectId && projectById.has(session.activeProjectId)) {
-    resolvedProjectId = session.activeProjectId;
-  } else if (projects.length > 0) {
-    resolvedProjectId = projects[0].id;
-    session.activeProjectId = projects[0].id;
+  } else if (session.activeProjectId) {
+    // Check if user still has access to the active project
+    const hasAccess = await canUserAccessProject(params.userId, session.activeProjectId);
+    if (hasAccess && projectById.has(session.activeProjectId)) {
+      resolvedProjectId = session.activeProjectId;
+    } else if (accessibleProjects.length > 0) {
+      // Active project not accessible, switch to first accessible
+      resolvedProjectId = accessibleProjects[0].id;
+      session.activeProjectId = accessibleProjects[0].id;
+    } else {
+      session.activeProjectId = null;
+    }
+  } else if (accessibleProjects.length > 0) {
+    resolvedProjectId = accessibleProjects[0].id;
+    session.activeProjectId = accessibleProjects[0].id;
   } else {
     session.activeProjectId = null;
   }
@@ -450,6 +479,22 @@ async function sendTelegramMessage(
   }
 }
 
+async function sendTelegramChatAction(
+  botToken: string,
+  chatId: number | string,
+  action: "typing" | "upload_photo" | "record_video" | "upload_video" | "record_audio" | "upload_audio" | "upload_document" = "typing"
+): Promise<void> {
+  try {
+    await callTelegramApi(botToken, "sendChatAction", {
+      chat_id: chatId,
+      action: action,
+    });
+  } catch (error) {
+    // Silently ignore chat action errors - they're not critical
+    console.debug("Failed to send chat action:", error);
+  }
+}
+
 function helpText(activeProject?: { id?: string; name?: string }): string {
   const activeProjectLine = activeProject?.id
     ? `Active project: ${activeProject.name ? `${activeProject.name} (${activeProject.id})` : activeProject.id}`
@@ -595,6 +640,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Ensure user has access to at least one project (auto-add to "Семья" if needed)
+    const allProjects = await getAllProjects();
+    await ensureUserHasProjectAccess(allProjects, fromUserId);
+
     let sessionId = await getTelegramChatSessionId(botId, chatId);
     if (!sessionId) {
       sessionId = createDefaultTelegramSessionId(botId, chatId);
@@ -605,6 +654,7 @@ export async function POST(req: NextRequest) {
     if (command === "/start" || command === "/help") {
       const resolvedProject = await resolveTelegramProjectContext({
         sessionId,
+        userId: fromUserId,
         defaultProjectId,
       });
       await saveExternalSession({
@@ -648,6 +698,7 @@ export async function POST(req: NextRequest) {
     if (incomingFile) {
       externalContext = await ensureTelegramExternalChatContext({
         sessionId,
+        userId: fromUserId,
         defaultProjectId,
       });
       const fileBuffer = await downloadTelegramFile(botToken, incomingFile.fileId);
@@ -688,25 +739,69 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const result = await handleExternalMessage({
-        sessionId,
-        message: incomingSavedFile
-          ? `${incomingText}\n\nAttached file: ${incomingSavedFile.name}`
-          : incomingText,
-        projectId: externalContext?.projectId ?? defaultProjectId,
-        chatId: externalContext?.chatId,
-        currentPath: normalizeTelegramCurrentPath(externalContext?.currentPath),
-        runtimeData: {
-          telegram: {
+      // Resolve project context for text messages if not already done for file upload
+      let finalExternalContext = externalContext;
+      if (!finalExternalContext) {
+        const resolvedProject = await resolveTelegramProjectContext({
+          sessionId,
+          userId: fromUserId,
+          defaultProjectId,
+        });
+
+        if (!resolvedProject.resolvedProjectId) {
+          await sendTelegramMessage(
             botToken,
             chatId,
-            replyToMessageId: messageId ?? null,
-          },
-        },
-      });
+            "Нет доступных проектов. Обратитесь к администратору.",
+            messageId
+          );
+          return Response.json({
+            ok: true,
+            ignored: true,
+            reason: "no_accessible_projects",
+          });
+        }
 
-      await sendTelegramMessage(botToken, chatId, result.reply, messageId);
-      return Response.json({ ok: true });
+        finalExternalContext = await ensureTelegramExternalChatContext({
+          sessionId,
+          userId: fromUserId,
+          defaultProjectId,
+        });
+      }
+
+      // Send initial "typing" status and set up periodic refresh
+      await sendTelegramChatAction(botToken, chatId, "typing");
+
+      const typingInterval = setInterval(async () => {
+        await sendTelegramChatAction(botToken, chatId, "typing");
+      }, 4000); // Refresh every 4 seconds (Telegram typing indicator lasts ~5 seconds)
+
+      try {
+        const result = await handleExternalMessage({
+          sessionId,
+          message: incomingSavedFile
+            ? `${incomingText}\n\nAttached file: ${incomingSavedFile.name}`
+            : incomingText,
+          projectId: finalExternalContext.projectId,
+          chatId: finalExternalContext.chatId,
+          currentPath: normalizeTelegramCurrentPath(finalExternalContext.currentPath),
+          runtimeData: {
+            telegram: {
+              botToken,
+              chatId,
+              replyToMessageId: messageId ?? null,
+            },
+          },
+        });
+
+        clearInterval(typingInterval);
+        // Don't reply to old message - just send the response
+        await sendTelegramMessage(botToken, chatId, result.reply);
+        return Response.json({ ok: true });
+      } catch (error) {
+        clearInterval(typingInterval);
+        throw error;
+      }
     } catch (error) {
       if (error instanceof ExternalMessageError) {
         const errorMessage =
