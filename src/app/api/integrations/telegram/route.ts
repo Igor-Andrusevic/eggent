@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import path from "node:path";
+import fs from "node:fs/promises";
 import {
   ExternalMessageError,
   handleExternalMessage,
@@ -19,6 +21,8 @@ import {
   getTelegramIntegrationRuntimeConfig,
   normalizeTelegramUserId,
 } from "@/lib/storage/telegram-integration-store";
+import { importKnowledgeFile } from "@/lib/memory/knowledge";
+import { getSettings } from "@/lib/storage/settings-store";
 import { saveChatFile } from "@/lib/storage/chat-files-store";
 import { createChat, getChat } from "@/lib/storage/chat-store";
 import {
@@ -707,6 +711,36 @@ export async function POST(req: NextRequest) {
         fileBuffer,
         incomingFile.fileName
       );
+
+      // Automatically import file to project knowledge base
+      try {
+        const chat = await getChat(externalContext.chatId);
+        if (chat && chat.projectId) {
+          const projectDir = path.join(process.cwd(), "data", "projects", chat.projectId);
+          const knowledgeDir = path.join(projectDir, ".meta", "knowledge");
+
+          // Ensure knowledge directory exists
+          await fs.mkdir(knowledgeDir, { recursive: true });
+
+          // Copy file to knowledge directory
+          const knowledgeFilePath = path.join(knowledgeDir, incomingFile.fileName);
+          await fs.writeFile(knowledgeFilePath, fileBuffer);
+
+          // Import into vector DB for semantic search
+          const settings = await getSettings();
+          const result = await importKnowledgeFile(knowledgeDir, chat.projectId, settings, incomingFile.fileName);
+
+          console.log(`Telegram file ${incomingFile.fileName} imported to knowledge base:`, {
+            imported: result.imported,
+            skipped: result.skipped,
+            errors: result.errors.length
+          });
+        }
+      } catch (error) {
+        console.error("Error importing Telegram file to knowledge base:", error);
+        // Continue even if knowledge import fails - file is still saved
+      }
+
       incomingSavedFile = {
         name: saved.name,
         path: saved.path,
@@ -719,7 +753,7 @@ export async function POST(req: NextRequest) {
         await sendTelegramMessage(
           botToken,
           chatId,
-          `File "${incomingSavedFile.name}" saved to chat files.`,
+          `✅ Файл "${incomingSavedFile.name}" сохранён и импортирован в базу знаний!\n\nТеперь вы можете задавать вопросы по содержимому файла. Я буду искать релевантную информацию и отвечать на основе содержимого.`,
           messageId
         );
         return Response.json({
