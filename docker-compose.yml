@@ -23,6 +23,12 @@ services:
       - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
+      - ./bundled-skills:/app/bundled-skills
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test:
         [
@@ -35,3 +41,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - eggent_default
+      - nginx-proxy-manager_default
+
+networks:
+  eggent_default:
+    external: true
+  nginx-proxy-manager_default:
+    external: true
+    name: nginx-proxy-manager_default
