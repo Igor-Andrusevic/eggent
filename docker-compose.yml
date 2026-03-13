@@ -24,6 +24,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./bundled-skills:/app/bundled-skills
+      # Host monitoring (read-only)
+      - /var/log:/host/var/log:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     logging:
       driver: "json-file"
       options:

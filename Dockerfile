@@ -31,6 +31,7 @@ RUN apt-get update \
     bash \
     ca-certificates \
     curl \
+    docker.io \
     git \
     jq \
     libasound2 \
@@ -71,7 +72,8 @@ COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoin
 
 RUN mkdir -p /app/data/tmp /app/data/ms-playwright /app/data/npm-cache /app/data/.cache \
   && chmod +x /app/scripts/docker-entrypoint.sh \
-  && chown -R node:node /app "${PYTHON_VENV}"
+  && chown -R node:node /app "${PYTHON_VENV}" \
+  && usermod -aG docker node
 
 USER node
 EXPOSE 3000
