@@ -63,12 +63,12 @@ send_telegram_message() {
 
     # Check if current time is within allowed hours
     if ! is_allowed_time; then
-        log "${YELLOW}⏰ Outside notification hours ($ALLOWED_START_HOUR:00-$ALLOWED_END_HOUR:00), skipping Telegram notification${NC}"
+        log "${YELLOW}⏰ Вне времени уведомлений ($ALLOWED_START_HOUR:00-$ALLOWED_END_HOUR:00), пропускаем Telegram уведомление${NC}"
         return 0
     fi
 
     if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_NOTIFICATION_CHAT_ID" ]; then
-        log "${YELLOW}⚠ Telegram notifications not configured${NC}"
+        log "${YELLOW}⚠ Telegram уведомления не настроены${NC}"
         return 1
     fi
 
@@ -86,47 +86,47 @@ send_telegram_message() {
 }
 
 send_update_start_notification() {
-    local message="*🔄 Eggent Auto-Update Started*%0A%0A"
-    message+="Time: $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    message+="Server: $(hostname)%0A%0A"
-    message+="Checking for updates from upstream..."
+    local message="*🔄 Eggent: Начало автоматического обновления*%0A%0A"
+    message+="Время: $(date '+%Y-%m-%d %H:%M:%S')%0A"
+    message+="Сервер: $(hostname)%0A%0A"
+    message+="Проверка наличия обновлений..."
 
     send_telegram_message "$message" "Markdown"
 }
 
 send_update_success_notification() {
     local commits_count="$1"
-    local message="*✅ Eggent Updated Successfully*%0A%0A"
-    message+="Time: $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    message+="New commits: $commits_count%0A%0A"
-    message+="Changes applied:%0A"
-    message+="• Git update (rebase)%0A"
-    message+="• Patches applied%0A"
-    message+="• Docker rebuilt%0A"
-    message+="• Container restarted%0A%0A"
-    message+="Status: All systems operational"
+    local message="*✅ Eggent: Обновление успешно завершено*%0A%0A"
+    message+="Время: $(date '+%Y-%m-%d %H:%M:%S')%0A"
+    message+="Новых коммитов: $commits_count%0A%0A"
+    message+="Применённые изменения:%0A"
+    message+="• Git обновление (rebase)%0A"
+    message+="• Патчи применены%0A"
+    message+="• Docker пересобран%0A"
+    message+="• Контейнер перезапущен%0A%0A"
+    message+="Статус: Все системы работают"
 
     send_telegram_message "$message" "Markdown"
 }
 
 send_update_error_notification() {
     local error_message="$1"
-    local message="*❌ Eggent Update Failed*%0A%0A"
-    message+="Time: $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    message+="Error: $error_message%0A%0A"
-    message+="Check logs: $LOG_FILE"
+    local message="*❌ Eggent: Ошибка обновления*%0A%0A"
+    message+="Время: $(date '+%Y-%m-%d %H:%M:%S')%0A"
+    message+="Ошибка: $error_message%0A%0A"
+    message="❌ Eggent: Ошибка обновления%0A%0AВремя: $(date '+%Y-%m-%d %H:%M:%S')%0AОшибка: $error_message%0A%0AПроверьте логи: $LOG_FILE"
 
     send_telegram_message "$message" "Markdown"
 }
 
 send_conflicts_notification() {
     local conflict_files="$1"
-    local message="*⚠️ Update Conflicts Detected*%0A%0A"
-    message+="Time: $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    message+="Git rebase has conflicts that need manual resolution.%0A%0A"
-    message+="Conflicting files:%0A"
+    local message="*⚠️ Eggent: Обнаружены конфликты*%0A%0A"
+    message+="Время: $(date '+%Y-%m-%d %H:%M:%S')%0A"
+    message+="Git rebase обнаружил конфликты, требующие ручного разрешения.%0A%0A"
+    message+="Файлы с конфликтами:%0A"
     message+="$conflict_files%0A%0A"
-    message+="Please resolve manually:%0A"
+    message="⚠️ Eggent: Обнаружены конфликты%0A%0AВремя: $(date '+%Y-%m-%d %H:%M:%S')%0AGit rebase обнаружил конфликты%0A%0AФайлы:%0A$conflict_files%0A%0AРазрешите вручную:%0A"
     message+="\`cd ~/.eggent\`%0A"
     message+="\`git status\`%0A"
     message+="\`git rebase --continue\`"
@@ -135,10 +135,10 @@ send_conflicts_notification() {
 }
 
 send_no_updates_notification() {
-    local message="*✓ Eggent Already Up to Date*%0A%0A"
-    message+="Time: $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    message+="No new commits from upstream%0A%0A"
-    message+="Status: Running latest version"
+    local message="*✓ Eggent: Уже актуальная версия*%0A%0A"
+    message+="Время: $(date '+%Y-%m-%d %H:%M:%S')%0A"
+    message+="Нет новых коммитов%0A%0A"
+    message+="Статус: Запущена последняя версия"
 
     send_telegram_message "$message" "Markdown"
 }
@@ -151,7 +151,7 @@ check_updates_available() {
     cd "$PROJECT_ROOT"
 
     # Fetch from upstream
-    log "${BLUE}Fetching from upstream...${NC}"
+    log "${BLUE}Получение обновлений из upstream...${NC}"
     git fetch upstream >> "$LOG_FILE" 2>&1
 
     # Check if there are new commits
@@ -181,13 +181,13 @@ create_backup_branch() {
 perform_update() {
     cd "$PROJECT_ROOT"
 
-    log "${BLUE}Starting update process...${NC}"
+    log "${BLUE}Запуск процесса обновления...${NC}"
 
     # Create backup
     local backup_branch=$(create_backup_branch)
 
     # Try rebase
-    log "${BLUE}Rebasing onto upstream/main...${NC}"
+    log "${BLUE}Применение rebase из upstream/main...${NC}"
     if ! git rebase upstream/main >> "$LOG_FILE" 2>&1; then
         # Check if it's a conflict
         if git status | grep -q "both modified"; then
@@ -203,27 +203,27 @@ perform_update() {
     log "${GREEN}✓ Rebase successful${NC}"
 
     # Push to fork
-    log "${BLUE}Pushing to fork...${NC}"
+    log "${BLUE}Отправка в fork...${NC}"
     git push origin main --force-with-lease >> "$LOG_FILE" 2>&1
     log "${GREEN}✓ Pushed to fork${NC}"
 
     # Apply patches
-    log "${BLUE}Applying patches...${NC}"
+    log "${BLUE}Применение патчей...${NC}"
     npm install >> "$LOG_FILE" 2>&1
     log "${GREEN}✓ Patches applied${NC}"
 
     # Rebuild Docker
-    log "${BLUE}Rebuilding Docker container...${NC}"
+    log "${BLUE}Пересборка Docker контейнера...${NC}"
     docker compose build --no-cache app >> "$LOG_FILE" 2>&1
     log "${GREEN}✓ Container rebuilt${NC}"
 
     # Restart container
-    log "${BLUE}Restarting container...${NC}"
+    log "${BLUE}Перезапуск контейнера...${NC}"
     docker compose up -d app >> "$LOG_FILE" 2>&1
     log "${GREEN}✓ Container restarted${NC}"
 
     # Wait for health check
-    log "${BLUE}Waiting for health check...${NC}"
+    log "${BLUE}Ожидание проверки работоспособности...${NC}"
     sleep 10
 
     if docker exec eggent-app-1 curl -f http://localhost:3000/api/health >> "$LOG_FILE" 2>&1; then
@@ -255,36 +255,36 @@ main() {
     # Check if current time is within allowed hours
     if ! is_allowed_time; then
         local current_hour=$(date +%H:%M)
-        log "${YELLOW}⏰ Current time is $current_hour (outside $ALLOWED_START_HOUR:00-$ALLOWED_END_HOUR:00)${NC}"
-        log "${YELLOW}⏰ Skipping auto-update (will retry during allowed hours)${NC}"
+        log "${YELLOW}⏰ Текущее время $current_hour (вне $ALLOWED_START_HOUR:00-$ALLOWED_END_HOUR:00)${NC}"
+        log "${YELLOW}⏰ Skipping auto-update (повтор в разрешённое время)${NC}"
         exit 0
     fi
 
-    log "${GREEN}✓ Time check passed ($(date +%H:%M))${NC}"
+    log "${GREEN}✅ Проверка времени пройдена ($(date +%H:%M))${NC}"
 
     # Send start notification
     send_update_start_notification
 
     # Check for updates
     if ! check_updates_available; then
-        log "${GREEN}✓ No updates available${NC}"
+        log "${GREEN}✓ Нет обновлений${NC}"
         send_no_updates_notification
         exit 0
     fi
 
     # Count new commits
     local commits_count=$(count_new_commits)
-    log "${GREEN}✓ $commits_count new commits available${NC}"
+    log "${GREEN}✓ $commits_count новых коммитов${NC}"
 
     # Perform update
     if perform_update; then
         log "${GREEN}╔══════════════════════════════════════╗${NC}"
-        log "${GREEN}║   Update completed successfully!      ║${NC}"
+        log "${GREEN}║   Обновление успешно завершено!      ║${NC}"
         log "${GREEN}╚══════════════════════════════════════╝${NC}"
         send_update_success_notification "$commits_count"
         exit 0
     else
-        log "${RED}✗ Update failed${NC}"
+        log "${RED}✗ Обновление не удалось${NC}"
         send_update_error_notification "Update process failed. Check logs."
         exit 1
     fi
