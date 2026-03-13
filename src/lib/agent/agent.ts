@@ -19,7 +19,7 @@ import type { ChatMessage } from "@/lib/types";
 import { publishUiSyncEvent } from "@/lib/realtime/event-bus";
 
 const LLM_LOG_BORDER = "═".repeat(60);
-const MAX_TOOL_STEPS_PER_TURN = 30;
+const MAX_TOOL_STEPS_PER_TURN = 15;
 const MAX_TOOL_STEPS_SUBORDINATE = 15;
 const POLL_NO_PROGRESS_BLOCK_THRESHOLD = 16;
 const POLL_BACKOFF_SCHEDULE_MS = [5000, 10000, 30000, 60000] as const;
@@ -406,23 +406,21 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[]): ModelMessa
         }],
       });
     } else if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
-      // Assistant message with tool calls - AI SDK uses 'input' not 'args'
-      const content: Array<
-        | { type: "text"; text: string }
-        | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-      > = [];
-      if (m.content) {
-        content.push({ type: "text", text: m.content });
+      // Assistant message with tool calls
+      // IMPORTANT: Gemini requires text and tool calls to be in separate messages
+      // If there's both text and tool calls, split into two messages
+      if (m.content && m.content.trim()) {
+        // First message: text only
+        result.push({ role: "assistant", content: m.content });
       }
-      for (const tc of m.toolCalls) {
-        content.push({
-          type: "tool-call",
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          input: tc.args,
-        });
-      }
-      result.push({ role: "assistant", content });
+      // Second message: tool calls only
+      const toolCallContent = m.toolCalls.map(tc => ({
+        type: "tool-call" as const,
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        input: tc.args,
+      }));
+      result.push({ role: "assistant", content: toolCallContent });
     } else if (m.role === "user" || m.role === "assistant") {
       // Regular user or assistant message
       result.push({ role: m.role, content: m.content });
@@ -746,7 +744,7 @@ export async function runAgent(options: {
   }
 
   // Build tools: base + optional MCP tools from project .meta/mcp
-  const baseTools = createAgentTools(context, settings);
+  const baseTools = await createAgentTools(context, settings);
   let mcpCleanup: (() => Promise<void>) | undefined;
   let tools = baseTools;
   if (options.projectId) {
@@ -933,7 +931,7 @@ export async function runAgentText(options: {
     context.history = history.getAll();
   }
 
-  const baseTools = createAgentTools(context, settings);
+  const baseTools = await createAgentTools(context, settings);
   let mcpCleanup: (() => Promise<void>) | undefined;
   let tools = baseTools;
   if (options.projectId) {
@@ -1069,7 +1067,7 @@ export async function runSubordinateAgent(options: {
     data: {},
   };
 
-  let tools = createAgentTools(context, settings);
+  let tools = await createAgentTools(context, settings);
   let mcpCleanupSub: (() => Promise<void>) | undefined;
   if (options.projectId) {
     const mcp = await getProjectMcpTools(options.projectId);
