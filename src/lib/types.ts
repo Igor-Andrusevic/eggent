@@ -130,6 +130,28 @@ export interface Project {
 }
 
 /**
+ * Access rules for a specific project.
+ * Maps project IDs to their allowed user lists.
+ */
+export interface ProjectAccessEntry {
+  /** List of Telegram user IDs allowed to access this project */
+  allowedUserIds: string[];
+}
+
+/**
+ * Global project access configuration.
+ * Stored in data/settings/project-access.json
+ */
+export interface ProjectAccessRules {
+  /** Admin users have access to all projects */
+  adminUserIds: string[];
+  /** Project-specific access rules (key = projectId) */
+  projectAccess: Record<string, ProjectAccessEntry>;
+  /** Timestamp of last update */
+  updatedAt?: string;
+}
+
+/**
  * Project Skill (Agent Skills spec: https://agentskills.io/specification).
  * Each skill is a directory under .meta/skills/<skill-name>/ with SKILL.md.
  */

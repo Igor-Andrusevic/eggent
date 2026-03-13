@@ -16,6 +16,7 @@ import {
   removeManagedProcessSession,
 } from "@/lib/tools/code-execution";
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
+import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
 import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
@@ -36,6 +37,7 @@ import {
   writeSkillFile,
   upsertProjectMcpServer,
   deleteProjectMcpServer,
+  loadProjectMcpServers,
 } from "@/lib/storage/project-store";
 
 const SKILL_RESOURCE_LIST_LIMIT = 60;
@@ -509,10 +511,10 @@ function formatRequiredResourceSkipReason(reason: RequiredResourceSkipReason): s
 /**
  * Create all agent tools based on context and settings
  */
-export function createAgentTools(
+export async function createAgentTools(
   context: AgentContext,
   settings: AppSettings
-): ToolSet {
+): Promise<ToolSet> {
   const tools: ToolSet = {};
 
   // Response tool -- always present
@@ -1248,6 +1250,62 @@ export function createAgentTools(
       },
     });
   }
+
+  // Notion tools
+  const mcpConfig = await loadProjectMcpServers(context.projectId ?? "");
+  const mcpServers = mcpConfig?.servers ?? [];
+
+  tools.search_notion = tool({
+    description:
+      "Search for pages and databases in Notion. Use this to find parent pages or databases before creating new content.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .describe("Search query to find pages or databases"),
+      filter: z
+        .enum(["page", "database"])
+        .optional()
+        .describe("Filter by type: 'page' or 'database'"),
+    }),
+    execute: async ({ query, filter }) => {
+      return searchNotionPages(mcpServers, query, filter ? { object: filter } : undefined);
+    },
+  });
+
+  tools.create_notion_page = tool({
+    description:
+      "Create a new page in Notion. Automatically finds parent by name or creates in workspace root if not specified.",
+    inputSchema: z.object({
+      title: z
+        .string()
+        .describe("Page title"),
+      content: z
+        .string()
+        .optional()
+        .describe("Page content (optional)"),
+      parentName: z
+        .string()
+        .optional()
+        .describe("Parent page name to search for (optional). If not found, creates in workspace root."),
+      parentId: z
+        .string()
+        .optional()
+        .describe("Direct parent page or database ID (optional)"),
+      parentType: z
+        .enum(["page", "database", "workspace"])
+        .optional()
+        .describe("Parent type when using parentId: 'page', 'database', or 'workspace'"),
+    }),
+    execute: async ({ title, content, parentName, parentId, parentType }) => {
+      return createNotionPage(mcpServers, {
+        title,
+        content,
+        parentId,
+        parentName,
+        parentType,
+      });
+    },
+  });
 
   // Knowledge query tool
   tools.knowledge_query = tool({
