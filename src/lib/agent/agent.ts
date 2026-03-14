@@ -839,7 +839,8 @@ export async function runAgent(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    const historyLimit = settings.chatModel.provider === "google" ? 20 : 80;
+    // Need to leave room for current user message, so limit to 15 instead of 20
+    const historyLimit = settings.chatModel.provider === "google" ? 15 : 80;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
@@ -1030,7 +1031,8 @@ export async function runAgentText(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    const historyLimit = settings.chatModel.provider === "google" ? 20 : 80;
+    // Need to leave room for current user message, so limit to 15 instead of 20
+    const historyLimit = settings.chatModel.provider === "google" ? 15 : 80;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
