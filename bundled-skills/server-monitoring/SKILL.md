@@ -30,21 +30,27 @@ tags: monitoring, system, server, security
 
 ### CPU и Memory
 ```bash
-cat /proc/loadavg                              # Load average
-cat /proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|Swap'  # Memory info
+cat /host/proc/loadavg                              # Load average
+cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|Swap'  # Memory info
+# Уptime из секунды
+cat /host/proc/uptime | awk '{print int($1/86400)" days "int($1%86400/3600)" hours "int($1%3600/60)" minutes"}'
 ```
 
 ### Диск и Filesystem
 ```bash
-df -h                               # Использование диска
-lsblk                               # Структура дисков
-du -sh /app/data/*                  # Размер директорий Eggent
+df -h /                                               # Использование диска хоста
+df -h /app/data                                      # Размер директории данных
+du -sh /app/data/* | sort -hr | head -10            # Крупные директории Eggent
+docker system df                                     # Docker дисковое пространство
 ```
 
 ### Сеть и соединения
 ```bash
-ss -tuln                           # Открытые порты
-ss -s                              # Статистика соединений
+# Проверить открытые порты через docker ps
+docker ps --format "{{.Ports}}"                       # Порты контейнеров
+# Статистика сети из /proc
+cat /host/proc/net/tcp | wc -l                       # TCP соединения
+cat /host/proc/net/udp | wc -l                       # UDP соединения
 ```
 
 ### Docker контейнеры
@@ -67,37 +73,36 @@ sudo grep -i error /host/var/log/syslog | tail -20  # Только ошибки
 🖥️ СОСТОЯНИЕ СЕРВЕРА
 
 ⏰ Время: [текущее время и дата]
-📊 Uptime: [uptime - дни, часы]
+📊 Uptime: [uptime из /host/proc/uptime - дни, часы]
 📍 Location: Hetzner-srv02
 
 💾 CPU & Memory:
-  CPU Load: [1min] [5min] [15min]
-  RAM: [использовано / всего] ([процент])
+  CPU Load: [1min] [5min] [15min] из /host/proc/loadavg
+  RAM: [использовано / всего] ([процент]) из /host/proc/meminfo
   Swap: [использовано / всего] ([процент])
-  📈 Топ процессов по CPU:
-    1. [процесс] - [CPU%]
-    2. [процесс] - [CPU%]
-    3. [процесс] - [CPU%]
+  📈 Docker контейнеры по CPU:
+    1. [контейнер] - [CPU%]
+    2. [контейнер] - [CPU%]
+    3. [контейнер] - [CPU%]
 
 💽 Дисковое пространство:
-  Root (/): [использовано / всего] ([процент])
-  /home: [использовано / всего] ([процент])
+  Root (/): [использовано / всего] ([процент]) из df -h /
+  Docker: [информация из docker system df]
   📦 Крупные директории:
-    - ~/.eggent/data: [размер]
-    - ~/.eggent/node_modules: [размер]
+    - /app/data: [размер]
     - docker images: [размер]
 
 🌐 Сеть:
-  Открытых портов: [количество]
-  Активных соединений: [количество]
-  🔥 Прослушиваемые порты: [список]
+  Открытых портов контейнеров: [количество из docker ps]
+  🔥 Прослушиваемые порты: [список из docker ps]
 
 🐳 Docker контейнеры:
   Запущено: [количество] из [всего]
   Статус: [✅ OK / ⚠️ PROBLEMS]
+  📊 Ресурсы: [таблица из docker stats --no-stream]
 
 📋 Последние ошибки в логах:
-  [если есть ошибки - показать последние 3-5]
+  [если есть ошибки - показать последние 3-5 из /host/var/log/syslog]
 
 ⚠️ Критические проблемы:
   [если проблемы есть - 🔴 выделить красным]
@@ -128,21 +133,30 @@ sudo grep -i error /host/var/log/syslog | tail -20  # Только ошибки
 
 ### CPU проблемы
 ```bash
-top -b -n 1 | head -30
-ps aux --sort=-%cpu | head -20
+# Список процессов с хоста (если доступно)
+cat /host/proc/*/status 2>/dev/null | grep -E "Name|State|VmSize" | head -50
+# Load average
+cat /host/proc/loadavg
+# Docker контейнеры по ресурсам
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 ```
 
 ### Память проблемы
 ```bash
-free -h
-ps aux --sort=-%mem | head -20
-cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|Swap'
+# Детальная информация о памяти
+cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|SwapTotal|SwapFree'
+# Docker использование памяти
+docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}"
 ```
 
 ### Диск проблемы
 ```bash
+# Детальный анализ диска
 du -sh /app/data/* | sort -hr | head -20
-df -h
+# Docker образы и контейнеры
+docker system df -v
+# Неиспользуемые образы
+docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -v "latest"
 ```
 
 ## 📝 Quick Commands
