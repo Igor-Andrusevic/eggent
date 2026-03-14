@@ -775,10 +775,13 @@ export async function POST(req: NextRequest) {
       return Response.json({ ok: true, ignored: true, reason: "non_text" });
     }
 
+    console.log(`[Telegram] About to process message, incomingText: "${incomingText}", isVoiceMessage: ${incomingSavedFile?.name?.startsWith('voice-')}, externalContext: ${!!externalContext}`);
+
     try {
       // Resolve project context for text messages if not already done for file upload
       let finalExternalContext = externalContext;
       if (!finalExternalContext) {
+        console.log(`[Telegram] No externalContext, resolving project...`);
         const resolvedProject = await resolveTelegramProjectContext({
           sessionId,
           userId: fromUserId,
@@ -804,10 +807,14 @@ export async function POST(req: NextRequest) {
           userId: fromUserId,
           defaultProjectId,
         });
+        console.log(`[Telegram] Resolved externalContext, projectId: ${finalExternalContext.projectId}`);
       }
+
+      console.log(`[Telegram] finalExternalContext set, projectId: ${finalExternalContext.projectId}`);
 
       // Send initial "typing" status and set up periodic refresh
       await sendTelegramChatAction(botToken, chatId, "typing");
+      console.log(`[Telegram] Sent typing action, about to call handleExternalMessage`);
 
       const typingInterval = setInterval(async () => {
         await sendTelegramChatAction(botToken, chatId, "typing");
