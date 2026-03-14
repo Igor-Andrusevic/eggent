@@ -4,16 +4,20 @@ import { insertMemory, searchMemory, deleteMemoryByMetadata } from "@/lib/memory
 import type { AppSettings } from "@/lib/types";
 import { loadDocument } from "@/lib/memory/loaders";
 import { RecursiveCharacterTextSplitter } from "@/lib/memory/text-splitter";
+import { transcribeAudio, isAudioFile } from "@/lib/memory/audio-transcription";
 
 /**
- * Supported file extensions
+ * Supported file extensions (including audio for transcription)
  */
 const SUPPORTED_EXTENSIONS = new Set([
   ".txt", ".md", ".json", ".csv", ".html",
   ".py", ".js", ".ts", ".xml", ".yaml", ".yml", ".log",
   ".pdf",
   ".docx", ".xlsx", ".xls",
-  ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"
+  ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+  // Audio files (will be transcribed)
+  ".ogg", ".mp3", ".wav", ".m4a", ".mp4", ".mpeg", ".mpga",
+  ".webm", ".amr", ".flac", ".wma"
 ]);
 
 function createSplitterOptions(settings: AppSettings) {
@@ -59,20 +63,45 @@ export async function importKnowledgeFile(
   const filePath = path.join(knowledgeDir, filename);
 
   try {
-    const doc = await loadDocument(filePath);
-    if (!doc || !doc.text.trim()) {
+    let docText: string | null = null;
+    let metadata: Record<string, unknown> = { filename };
+
+    // Handle audio files - transcribe them first
+    if (isAudioFile(filename)) {
+      try {
+        console.log(`[Knowledge] Transcribing audio file: ${filename}`);
+        docText = await transcribeAudio(filePath, settings);
+        metadata.audioTranscribed = true;
+        metadata.originalFormat = ext;
+        console.log(`[Knowledge] Transcription complete for ${filename}: ${docText.length} chars`);
+      } catch (transcribeError) {
+        const errorMsg = transcribeError instanceof Error ? transcribeError.message : String(transcribeError);
+        result.errors.push(
+          `Failed to transcribe audio file ${filename}: ${errorMsg}`
+        );
+        // Try to treat as regular document as fallback
+        const doc = await loadDocument(filePath);
+        docText = doc?.text || null;
+      }
+    } else {
+      // Regular document loading
+      const doc = await loadDocument(filePath);
+      docText = doc?.text || null;
+    }
+
+    if (!docText || !docText.trim()) {
       result.skipped++;
       return result;
     }
 
-    const chunks = await splitter.splitText(doc.text);
+    const chunks = await splitter.splitText(docText);
     for (const chunk of chunks) {
       await insertMemory(
         chunk,
         "knowledge",
         memorySubdir,
         settings,
-        { filename }
+        metadata
       );
       result.imported++;
     }
@@ -123,20 +152,45 @@ export async function importKnowledge(
 
       const filePath = path.join(knowledgeDir, entry.name);
       try {
-        const doc = await loadDocument(filePath);
-        if (!doc || !doc.text.trim()) {
+        let docText: string | null = null;
+        let metadata: Record<string, unknown> = { filename: entry.name };
+
+        // Handle audio files - transcribe them first
+        if (isAudioFile(entry.name)) {
+          try {
+            console.log(`[Knowledge] Transcribing audio file: ${entry.name}`);
+            docText = await transcribeAudio(filePath, settings);
+            metadata.audioTranscribed = true;
+            metadata.originalFormat = ext;
+            console.log(`[Knowledge] Transcription complete for ${entry.name}: ${docText.length} chars`);
+          } catch (transcribeError) {
+            const errorMsg = transcribeError instanceof Error ? transcribeError.message : String(transcribeError);
+            result.errors.push(
+              `Failed to transcribe audio file ${entry.name}: ${errorMsg}`
+            );
+            // Try to treat as regular document as fallback
+            const doc = await loadDocument(filePath);
+            docText = doc?.text || null;
+          }
+        } else {
+          // Regular document loading
+          const doc = await loadDocument(filePath);
+          docText = doc?.text || null;
+        }
+
+        if (!docText || !docText.trim()) {
           result.skipped++;
           continue;
         }
 
-        const chunks = await splitter.splitText(doc.text);
+        const chunks = await splitter.splitText(docText);
         for (const chunk of chunks) {
           await insertMemory(
             chunk,
             "knowledge",
             memorySubdir,
             settings,
-            { filename: entry.name }
+            metadata
           );
           result.imported++;
         }
