@@ -390,7 +390,101 @@ function applyGlobalToolLoopGuard(tools: ToolSet): ToolSet {
 /**
  * Convert stored ChatMessages to AI SDK ModelMessage format
  */
-function convertChatMessagesToModelMessages(messages: ChatMessage[]): ModelMessage[] {
+/**
+ * Validate and fix function call ordering for Gemini
+ * Gemini requires: tool-call -> tool-result -> tool-call -> tool-result
+ * If order is broken, filter out the problematic messages
+ */
+function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessage[] {
+  const result: ModelMessage[] = [];
+  const pendingToolCalls = new Map<string, ModelMessage>();
+
+  for (const msg of messages) {
+    if (msg.role === "assistant") {
+      const content = msg.content;
+      if (Array.isArray(content)) {
+        // Check if this is a tool call message
+        const hasToolCalls = content.some(part =>
+          part && typeof part === "object" && "type" in part && part.type === "tool-call"
+        );
+
+        if (hasToolCalls) {
+          // Extract tool call IDs
+          const toolCallIds = content
+            .filter((part): part is { type: string; toolCallId: string } =>
+              part && typeof part === "object" && "type" in part && part.type === "tool-call" && "toolCallId" in part
+            )
+            .map(part => part.toolCallId);
+
+          // Store pending tool calls
+          for (const id of toolCallIds) {
+            pendingToolCalls.set(id, msg);
+          }
+
+          result.push(msg);
+        } else {
+          // Regular assistant message
+          result.push(msg);
+        }
+      } else {
+        // Text message
+        result.push(msg);
+      }
+    } else if (msg.role === "tool") {
+      const content = msg.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part && typeof part === "object" && "type" in part && part.type === "tool-result") {
+            const toolResult = part as { toolCallId?: string; toolName?: string; output: unknown };
+
+            // Check if we have a matching tool call
+            if (toolResult.toolCallId && pendingToolCalls.has(toolResult.toolCallId)) {
+              // Valid sequence
+              pendingToolCalls.delete(toolResult.toolCallId);
+              result.push(msg);
+            } else {
+              // Orphaned tool result - skip it
+              console.debug(`Skipping orphaned tool result for ${toolResult.toolName || "unknown tool"}`);
+            }
+          }
+        }
+      }
+    } else {
+      // User or other messages
+      result.push(msg);
+    }
+  }
+
+  // Remove any pending tool calls that never got results
+  if (pendingToolCalls.size > 0) {
+    console.debug(`Filtering out ${pendingToolCalls.size} tool calls without results`);
+    return result.filter(msg => {
+      if (msg.role === "assistant") {
+        const content = msg.content;
+        if (Array.isArray(content)) {
+          const hasToolCalls = content.some(part =>
+            part && typeof part === "object" && "type" in part && part.type === "tool-call"
+          );
+          if (hasToolCalls) {
+            // Check if any of the tool calls are pending
+            const toolCallIds = content
+              .filter((part): part is { type: string; toolCallId: string } =>
+                part && typeof part === "object" && "type" in part && part.type === "tool-call" && "toolCallId" in part
+              )
+              .map(part => part.toolCallId);
+
+            return !toolCallIds.some(id => pendingToolCalls.has(id));
+          }
+        }
+      }
+      return true;
+    });
+  }
+
+  return result;
+}
+
+function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string): ModelMessage[] {
   const result: ModelMessage[] = [];
 
   for (const m of messages) {
@@ -426,6 +520,11 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[]): ModelMessa
       result.push({ role: m.role, content: m.content });
     }
     // Skip system messages for now
+  }
+
+  // Validate ordering for Gemini
+  if (provider === "google") {
+    return validateAndFixGeminiToolOrdering(result);
   }
 
   return result;
@@ -826,8 +925,11 @@ export async function runAgent(options: {
   const chat = await getChat(options.chatId);
   if (chat) {
     // Convert stored messages to ModelMessage format (including tool calls/results)
-    const allMessages = convertChatMessagesToModelMessages(chat.messages);
-    const history = new History(80);
+    const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
+
+    // Use shorter history for Gemini to avoid function ordering issues
+    const historyLimit = settings.chatModel.provider === "google" ? 20 : 80;
+    const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
   }
@@ -1159,8 +1261,11 @@ export async function runAgentText(options: {
 
   const chat = await getChat(options.chatId);
   if (chat) {
-    const allMessages = convertChatMessagesToModelMessages(chat.messages);
-    const history = new History(80);
+    const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
+
+    // Use shorter history for Gemini to avoid function ordering issues
+    const historyLimit = settings.chatModel.provider === "google" ? 20 : 80;
+    const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
   }
