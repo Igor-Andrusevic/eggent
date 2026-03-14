@@ -74,6 +74,7 @@ export async function importKnowledgeFile(
         metadata.audioTranscribed = true;
         metadata.originalFormat = ext;
         console.log(`[Knowledge] Transcription complete for ${filename}: ${docText.length} chars`);
+        console.log(`[Knowledge] Transcription preview: "${docText.substring(0, 100)}..."`);
       } catch (transcribeError) {
         const errorMsg = transcribeError instanceof Error ? transcribeError.message : String(transcribeError);
         result.errors.push(
@@ -96,6 +97,11 @@ export async function importKnowledgeFile(
 
     const chunks = await splitter.splitText(docText);
     for (const chunk of chunks) {
+      // Skip empty chunks to prevent embedding errors
+      if (!chunk || !chunk.trim()) {
+        console.log(`[Knowledge] Skipping empty chunk for ${filename}`);
+        continue;
+      }
       await insertMemory(
         chunk,
         "knowledge",
@@ -163,6 +169,7 @@ export async function importKnowledge(
             metadata.audioTranscribed = true;
             metadata.originalFormat = ext;
             console.log(`[Knowledge] Transcription complete for ${entry.name}: ${docText.length} chars`);
+            console.log(`[Knowledge] Transcription preview: "${docText.substring(0, 100)}..."`);
           } catch (transcribeError) {
             const errorMsg = transcribeError instanceof Error ? transcribeError.message : String(transcribeError);
             result.errors.push(
@@ -185,6 +192,11 @@ export async function importKnowledge(
 
         const chunks = await splitter.splitText(docText);
         for (const chunk of chunks) {
+          // Skip empty chunks to prevent embedding errors
+          if (!chunk || !chunk.trim()) {
+            console.log(`[Knowledge] Skipping empty chunk for ${entry.name}`);
+            continue;
+          }
           await insertMemory(
             chunk,
             "knowledge",
