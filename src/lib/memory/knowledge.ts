@@ -236,6 +236,8 @@ export async function queryKnowledge(
     metadata: Record<string, unknown>;
   }> = [];
 
+  console.log(`[Knowledge] Querying subdirs: ${knowledgeSubdirs.join(", ")}, query: "${query}", limit: ${limit}`);
+
   for (const subdir of knowledgeSubdirs) {
     try {
       const results = await searchMemory(
@@ -246,11 +248,15 @@ export async function queryKnowledge(
         settings,
         "knowledge"
       );
+      console.log(`[Knowledge] Subdir ${subdir} returned ${results.length} results`);
       allResults.push(...results);
-    } catch {
+    } catch (error) {
+      console.log(`[Knowledge] Error searching subdir ${subdir}: ${error}`);
       // Skip subdirs that don't exist
     }
   }
+
+  console.log(`[Knowledge] Total results from all subdirs: ${allResults.length}`);
 
   if (allResults.length === 0) {
     return "No relevant documents found in the knowledge base.";
@@ -274,5 +280,7 @@ export async function queryKnowledge(
     )
     .join("\n\n---\n\n");
 
-  return `Found ${unique.length} relevant document chunks:\n\n${formatted}`;
+  const result = `Found ${unique.length} relevant document chunks:\n\n${formatted}`;
+  console.log(`[Knowledge] Returning result, length: ${result.length}, preview: "${result.substring(0, 100)}..."`);
+  return result;
 }
