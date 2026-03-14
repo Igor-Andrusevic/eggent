@@ -748,7 +748,10 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    if (!incomingText) {
+    // For voice messages, detect and let the agent handle it with knowledge_query
+    const isVoiceMessage = incomingSavedFile?.name?.startsWith('voice-') && incomingSavedFile?.name?.endsWith('.ogg');
+
+    if (!incomingText && !isVoiceMessage) {
       if (incomingSavedFile) {
         await sendTelegramMessage(
           botToken,
@@ -811,11 +814,20 @@ export async function POST(req: NextRequest) {
       }, 4000); // Refresh every 4 seconds (Telegram typing indicator lasts ~5 seconds)
 
       try {
+        // For voice messages, add special marker so agent knows to use knowledge_query
+        const isVoiceMessage = incomingSavedFile?.name?.startsWith('voice-') && incomingSavedFile?.name?.endsWith('.ogg');
+        let messageToSend = incomingText;
+        if (incomingSavedFile) {
+          if (isVoiceMessage) {
+            messageToSend = `🎙️ ГОЛОСОВОЕ СООБЩЕНИЕ: ${incomingSavedFile.name}\n\n${incomingText}`.trim();
+          } else {
+            messageToSend = `${incomingText}\n\nAttached file: ${incomingSavedFile.name}`;
+          }
+        }
+
         const result = await handleExternalMessage({
           sessionId,
-          message: incomingSavedFile
-            ? `${incomingText}\n\nAttached file: ${incomingSavedFile.name}`
-            : incomingText,
+          message: messageToSend,
           projectId: finalExternalContext.projectId,
           chatId: finalExternalContext.chatId,
           currentPath: normalizeTelegramCurrentPath(finalExternalContext.currentPath),
