@@ -53,11 +53,17 @@ RUN apt-get update \
     python3 \
     python3-requests \
     python3-venv \
-    sudo \
     ripgrep \
+    sudo \
+    unzip \
   && python3 -m venv --system-site-packages "${PYTHON_VENV}" \
   && "${PYTHON_VENV}/bin/python3" -m pip --version \
   && rm -rf /var/lib/apt/lists/*
+
+# Install bun for MCP servers
+RUN curl -fsSL https://bun.sh/install | bash \
+  && mv /root/.bun/bin/* /usr/local/bin/ \
+  && rm -rf /root/.bun
 
 RUN echo "node ALL=(root) NOPASSWD: ALL" > /etc/sudoers.d/eggent-node \
   && chmod 440 /etc/sudoers.d/eggent-node
