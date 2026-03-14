@@ -130,6 +130,28 @@ export async function searchMemory(
   const db = await loadDB(subdir);
   if (db.documents.length === 0) return [];
 
+  // Special handling for empty queries: return latest documents by timestamp
+  if (!query || !query.trim()) {
+    console.log(`[Memory] Empty query detected, returning latest ${limit} documents`);
+    console.log(`[Memory] Total documents in DB: ${db.documents.length}, areaFilter: ${areaFilter}`);
+    let results = db.documents
+      .filter((doc) => !areaFilter || doc.metadata.area === areaFilter)
+      .sort((a, b) => {
+        const aTime = a.metadata.createdAt ?? '';
+        const bTime = b.metadata.createdAt ?? '';
+        return bTime.toString().localeCompare(aTime.toString());
+      })
+      .slice(0, limit)
+      .map((doc) => ({
+        id: doc.id,
+        text: doc.text,
+        score: 1.0, // Perfect score for latest documents
+        metadata: doc.metadata,
+      }));
+    console.log(`[Memory] Returning ${results.length} documents, first: "${results[0]?.text.substring(0, 50)}..."`);
+    return results;
+  }
+
   const embeddings = await embedTexts([query], settings.embeddingsModel);
   if (!embeddings || embeddings.length === 0) return [];
 
