@@ -394,12 +394,35 @@ function applyGlobalToolLoopGuard(tools: ToolSet): ToolSet {
  * Validate and fix function call ordering for Gemini
  * Gemini requires: tool-call -> tool-result -> tool-call -> tool-result
  * If order is broken, filter out the problematic messages
+ * Also ensures history starts with a user message
  */
 function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessage[] {
+  // First, ensure history starts with a user message
+  let firstUserIndex = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "user") {
+      firstUserIndex = i;
+      break;
+    }
+  }
+
+  // If no user message found, return empty history or add synthetic user message
+  if (firstUserIndex === -1) {
+    console.debug("No user message found in history, returning empty array to avoid Gemini errors");
+    return [];
+  }
+
+  // If history doesn't start with user, trim it
+  let workingMessages = messages;
+  if (firstUserIndex > 0) {
+    console.debug(`Trimming history to start from first user message (index ${firstUserIndex})`);
+    workingMessages = messages.slice(firstUserIndex);
+  }
+
   const result: ModelMessage[] = [];
   const pendingToolCalls = new Map<string, ModelMessage>();
 
-  for (const msg of messages) {
+  for (const msg of workingMessages) {
     if (msg.role === "assistant") {
       const content = msg.content;
       if (Array.isArray(content)) {
@@ -457,8 +480,9 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
 
   // Remove any pending tool calls that never got results
   if (pendingToolCalls.size > 0) {
-    console.debug(`Filtering out ${pendingToolCalls.size} tool calls without results`);
-    return result.filter(msg => {
+    console.debug(`[Gemini Validation] Filtering out ${pendingToolCalls.size} tool calls without results`);
+    const beforeFilter = result.length;
+    const filtered = result.filter(msg => {
       if (msg.role === "assistant") {
         const content = msg.content;
         if (Array.isArray(content)) {
@@ -479,8 +503,11 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
       }
       return true;
     });
+    console.debug(`[Gemini Validation] Filtered: ${beforeFilter} -> ${filtered.length} messages`);
+    return filtered;
   }
 
+  console.debug(`[Gemini Validation] Success: ${workingMessages.length} -> ${result.length} messages`);
   return result;
 }
 
@@ -928,8 +955,8 @@ export async function runAgent(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    // Need to leave room for current user message, so limit to 15 instead of 20
-    const historyLimit = settings.chatModel.provider === "google" ? 15 : 80;
+    // Increased limit with better validation logic
+    const historyLimit = settings.chatModel.provider === "google" ? 50 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
@@ -1265,8 +1292,8 @@ export async function runAgentText(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    // Need to leave room for current user message, so limit to 15 instead of 20
-    const historyLimit = settings.chatModel.provider === "google" ? 15 : 80;
+    // Increased limit with better validation logic
+    const historyLimit = settings.chatModel.provider === "google" ? 50 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
