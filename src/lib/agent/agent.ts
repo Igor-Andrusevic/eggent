@@ -395,6 +395,7 @@ function applyGlobalToolLoopGuard(tools: ToolSet): ToolSet {
  * Gemini requires: tool-call -> tool-result -> tool-call -> tool-result
  * If order is broken, filter out the problematic messages
  * Also ensures history starts with a user message
+ * ENHANCED: Better handles split text/tool-call messages and orphaned tool results
  */
 function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessage[] {
   // First, ensure history starts with a user message
@@ -419,7 +420,7 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
     workingMessages = messages.slice(firstUserIndex);
   }
 
-  const result: ModelMessage[] = [];
+  let result: ModelMessage[] = [];
   const pendingToolCalls = new Map<string, ModelMessage>();
 
   for (const msg of workingMessages) {
@@ -504,11 +505,36 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
       return true;
     });
     console.debug(`[Gemini Validation] Filtered: ${beforeFilter} -> ${filtered.length} messages`);
-    return filtered;
+    result = filtered;
   }
 
-  console.debug(`[Gemini Validation] Success: ${workingMessages.length} -> ${result.length} messages`);
-  return result;
+  // Final validation: ensure no consecutive assistant tool-call messages without tool results
+  const finalResult: ModelMessage[] = [];
+  let lastHadToolCalls = false;
+
+  for (const msg of result) {
+    if (msg.role === "assistant") {
+      const content = msg.content;
+      const hasToolCalls = Array.isArray(content) && content.some(part =>
+        part && typeof part === "object" && "type" in part && part.type === "tool-call"
+      );
+
+      if (hasToolCalls && lastHadToolCalls) {
+        // Skip consecutive tool-call messages (would cause API 400)
+        console.debug("[Gemini Validation] Skipping consecutive assistant tool-call message");
+        continue;
+      }
+
+      lastHadToolCalls = hasToolCalls;
+    } else if (msg.role === "tool") {
+      lastHadToolCalls = false;
+    }
+
+    finalResult.push(msg);
+  }
+
+  console.debug(`[Gemini Validation] Success: ${workingMessages.length} -> ${finalResult.length} messages`);
+  return finalResult;
 }
 
 function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string): ModelMessage[] {
@@ -955,8 +981,9 @@ export async function runAgent(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    // Increased limit with better validation logic
-    const historyLimit = settings.chatModel.provider === "google" ? 50 : 100;
+    // Reduced to 20 because each assistant message with tool calls splits into 2+ messages
+    // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
+    const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
@@ -1292,8 +1319,9 @@ export async function runAgentText(options: {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
     // Use shorter history for Gemini to avoid function ordering issues
-    // Increased limit with better validation logic
-    const historyLimit = settings.chatModel.provider === "google" ? 50 : 100;
+    // Reduced to 20 because each assistant message with tool calls splits into 2+ messages
+    // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
+    const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     context.history = history.getAll();
