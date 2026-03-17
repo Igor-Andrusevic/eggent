@@ -679,6 +679,53 @@ function getLastResponseToolText(messages: ModelMessage[]): string {
   return "";
 }
 
+function getLastNonResponseToolResult(messages: ModelMessage[]): {
+  toolName: string;
+  text: string;
+} | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) {
+      continue;
+    }
+
+    for (let j = msg.content.length - 1; j >= 0; j -= 1) {
+      const part = msg.content[j];
+      if (!(typeof part === "object" && part !== null)) continue;
+      if (!("type" in part) || part.type !== "tool-result") continue;
+
+      const toolName =
+        "toolName" in part && typeof (part as { toolName?: unknown }).toolName === "string"
+          ? (part as { toolName: string }).toolName
+          : "";
+      if (!toolName || toolName === "response") continue;
+
+      const output =
+        "output" in part ? (part as { output?: unknown }).output : (part as { result?: unknown }).result;
+      const text = extractToolResultOutputText(output).trim();
+      return {
+        toolName,
+        text,
+      };
+    }
+  }
+
+  return null;
+}
+
+function truncateForFallback(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars)}\n...[truncated]`;
+}
+
+function formatStreamErrorForUser(errorMessage: string): string {
+  const compact = errorMessage.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  return compact.length > 220 ? `${compact.slice(0, 220)}...` : compact;
+}
+
 function shouldAutoContinueAssistant(
   text: string,
   finishReason?: string
@@ -783,6 +830,8 @@ export async function runAgent(options: {
     label: "LLM Request (stream)",
   });
 
+  let streamErrorMessage = "";
+
   // Run the agent with streaming
   const result = streamText({
     model,
@@ -793,6 +842,10 @@ export async function runAgent(options: {
     stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
     temperature: settings.chatModel.temperature ?? 0.7,
     maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
+    onError: async ({ error }) => {
+      streamErrorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Agent stream error:", error);
+    },
     onFinish: async (event) => {
       const finishReason =
         typeof (event as unknown as { finishReason?: unknown }).finishReason === "string"
@@ -801,7 +854,9 @@ export async function runAgent(options: {
 
       const responseMessages = event.response.messages;
       const lastAssistantText = getLastAssistantText(responseMessages);
+      const responseToolText = getLastResponseToolText(responseMessages).trim();
       let continuationText = "";
+      let fallbackText = "";
 
       if (shouldAutoContinueAssistant(lastAssistantText, finishReason)) {
         try {
@@ -826,6 +881,40 @@ export async function runAgent(options: {
         } catch (error) {
           console.warn("Auto-continuation failed:", error);
         }
+      }
+
+      if (
+        !lastAssistantText.trim() &&
+        !responseToolText &&
+        !continuationText.trim()
+      ) {
+        const lastToolResult = getLastNonResponseToolResult(responseMessages);
+        const streamErrorText = formatStreamErrorForUser(streamErrorMessage);
+        const fallbackLines: string[] = [
+          "Tool execution finished, but I could not produce a final response for this turn.",
+        ];
+
+        if (streamErrorText) {
+          fallbackLines.push(`Reason: ${streamErrorText}`);
+        }
+
+        if (lastToolResult?.toolName) {
+          fallbackLines.push(`Last tool: \`${lastToolResult.toolName}\``);
+        }
+
+        if (lastToolResult?.text) {
+          fallbackLines.push(
+            [
+              "Last tool output (truncated):",
+              "```text",
+              truncateForFallback(lastToolResult.text, 1200),
+              "```",
+            ].join("\n")
+          );
+        }
+
+        fallbackLines.push("Send `continue` and I will finish the answer.");
+        fallbackText = fallbackLines.join("\n\n");
       }
 
       if (mcpCleanup) {
@@ -853,11 +942,11 @@ export async function runAgent(options: {
           for (const msg of responseMessages) {
             chat.messages.push(...convertModelMessageToChatMessages(msg, now));
           }
-          if (continuationText) {
+          if (continuationText || fallbackText) {
             chat.messages.push({
               id: crypto.randomUUID(),
               role: "assistant",
-              content: continuationText,
+              content: continuationText || fallbackText,
               createdAt: now,
             });
           }
@@ -880,7 +969,11 @@ export async function runAgent(options: {
         topic: "chat",
         projectId: options.projectId ?? null,
         chatId: options.chatId,
-        reason: continuationText ? "agent_turn_auto_continued" : "agent_turn_finished",
+        reason: continuationText
+          ? "agent_turn_auto_continued"
+          : fallbackText
+            ? "agent_turn_fallback_response"
+            : "agent_turn_finished",
       });
       publishUiSyncEvent({
         topic: "files",

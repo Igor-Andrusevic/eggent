@@ -208,6 +208,15 @@ function areUIMessagesEquivalentById(
   return true;
 }
 
+function formatChatErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return "The model stopped before producing a final response. Please retry.";
+  }
+  return compact.length > 280 ? `${compact.slice(0, 280)}...` : compact;
+}
+
 export function ChatPanel() {
   const {
     activeChatId,
@@ -220,6 +229,7 @@ export function ChatPanel() {
     addChat,
   } = useAppStore();
   const [input, setInput] = useState("");
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Internal chatId that stays stable during a message send.
   // Pre-generate a UUID so useChat always has a consistent id.
@@ -247,6 +257,7 @@ export function ChatPanel() {
   useEffect(() => {
     if (activeChatId !== prevActiveChatId.current) {
       prevActiveChatId.current = activeChatId;
+      setChatError(null);
       if (activeChatId !== null) {
         setInternalChatId(activeChatId);
       } else {
@@ -275,6 +286,7 @@ export function ChatPanel() {
     transport,
     onError: (error) => {
       console.error("Chat error:", error);
+      setChatError(formatChatErrorMessage(error));
     },
   });
 
@@ -435,6 +447,7 @@ export function ChatPanel() {
 
   const onSubmit = useCallback(() => {
     if (!input.trim() || isLoading) return;
+    setChatError(null);
 
     pendingProjectSwitchRef.current = true;
     submissionStartCountRef.current = messagesRef.current.length;
@@ -473,7 +486,7 @@ export function ChatPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <ChatMessages messages={messages} isLoading={isLoading} />
+      <ChatMessages messages={messages} isLoading={isLoading} errorMessage={chatError} />
       <ChatInput
         input={input}
         setInput={setInput}

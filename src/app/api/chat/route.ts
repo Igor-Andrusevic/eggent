@@ -5,6 +5,16 @@ import { ensureCronSchedulerStarted } from "@/lib/cron/runtime";
 
 export const maxDuration = 300; // 5 min max for long agent runs
 
+function formatChatStreamError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return "Generation failed after tool execution. Please retry.";
+  }
+  const short = compact.length > 220 ? `${compact.slice(0, 220)}...` : compact;
+  return `Generation failed after tool execution: ${short}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureCronSchedulerStarted();
@@ -59,6 +69,10 @@ export async function POST(req: NextRequest) {
     return result.toUIMessageStreamResponse({
       headers: {
         "X-Chat-Id": resolvedChatId,
+      },
+      onError: (error) => {
+        console.error("Chat stream response error:", error);
+        return formatChatStreamError(error);
       },
     });
   } catch (error) {

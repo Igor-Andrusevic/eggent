@@ -8,9 +8,10 @@ import type { UIMessage } from "ai";
 interface ChatMessagesProps {
   messages: UIMessage[];
   isLoading: boolean;
+  errorMessage?: string | null;
 }
 
-export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
+export function ChatMessages({ messages, isLoading, errorMessage }: ChatMessagesProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new messages
@@ -68,6 +69,12 @@ export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
             </div>
           </div>
         )}
+
+        {errorMessage ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div ref={endRef} />
       </div>
