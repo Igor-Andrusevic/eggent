@@ -11,6 +11,8 @@ export interface ExternalSession {
   activeProjectId: string | null;
   activeChats: Record<string, string>;
   currentPaths: Record<string, string>;
+  userTimezone?: string;
+  userLocale?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +58,8 @@ export async function getExternalSession(
         parsed.currentPaths && typeof parsed.currentPaths === "object"
           ? parsed.currentPaths
           : {},
+      userTimezone: parsed.userTimezone,
+      userLocale: parsed.userLocale,
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
     };

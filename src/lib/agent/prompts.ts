@@ -69,6 +69,8 @@ export async function buildSystemPrompt(options: {
   chatId?: string;
   agentNumber?: number;
   tools?: string[];
+  userTimezone?: string;
+  userLocale?: string;
 }): Promise<string> {
   const parts: string[] = [];
 
@@ -204,9 +206,28 @@ export async function buildSystemPrompt(options: {
   // 6. Current date/time (rounded to the hour for prompt caching)
   const now = new Date();
   now.setMinutes(0, 0, 0);
-  const dateStr = now.toISOString().slice(0, 13) + ":00:00Z";
+  const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const effectiveTimezone = options.userTimezone || serverTimezone;
+  const effectiveLocale = options.userLocale || "en";
+  
+  let userTimeStr: string;
+  try {
+    userTimeStr = now.toLocaleString(effectiveLocale, { 
+      timeZone: effectiveTimezone,
+      dateStyle: "full",
+      timeStyle: "short"
+    });
+  } catch {
+    userTimeStr = now.toISOString().slice(0, 13) + ":00:00Z";
+  }
+  
+  const serverTimeStr = now.toISOString().slice(0, 13) + ":00:00Z";
+  
   parts.push(
-    `\n## Current Information\n- Date/Time: ${dateStr}\n- Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`
+    `\n## Current Information\n` +
+    `- User's Local Time: ${userTimeStr} (${effectiveTimezone})\n` +
+    `- Server Time: ${serverTimeStr} (${serverTimezone})\n` +
+    `- User's Locale: ${effectiveLocale}`
   );
 
   return parts.join("\n\n");
