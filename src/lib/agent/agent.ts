@@ -508,6 +508,58 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
     result = filtered;
   }
 
+  // Merge consecutive assistant messages where first has text only and second has tool-calls
+  // This handles old history that was saved with split messages (pre-fix)
+  const mergedResult: ModelMessage[] = [];
+  let i = 0;
+  while (i < result.length) {
+    const msg = result[i];
+
+    if (
+      msg.role === "assistant" &&
+      i + 1 < result.length &&
+      result[i + 1].role === "assistant"
+    ) {
+      const currentContent = msg.content;
+      const nextContent = result[i + 1].content;
+
+      const currentIsTextOnly =
+        typeof currentContent === "string" && currentContent.trim().length > 0;
+
+      const nextHasToolCalls =
+        Array.isArray(nextContent) && nextContent.some(p =>
+          p && typeof p === "object" && "type" in p && p.type === "tool-call"
+        );
+
+      if (currentIsTextOnly && nextHasToolCalls) {
+        // Merge the two messages
+        const mergedContent: Array<
+          | { type: "text"; text: string }
+          | { type: string; toolCallId?: string; toolName?: string; input?: unknown }
+        > = [];
+
+        mergedContent.push({ type: "text", text: currentContent as string });
+
+        if (Array.isArray(nextContent)) {
+          for (const part of nextContent) {
+            if (part && typeof part === "object" && "type" in part) {
+              mergedContent.push(part as { type: string; toolCallId?: string; toolName?: string; input?: unknown });
+            }
+          }
+        }
+
+        mergedResult.push({ role: "assistant", content: mergedContent });
+        i += 2;
+        console.debug("[Gemini Validation] Merged consecutive assistant messages (text + tool-calls)");
+        continue;
+      }
+    }
+
+    mergedResult.push(msg);
+    i++;
+  }
+  result = mergedResult;
+
   // Final validation: ensure no consecutive assistant tool-call messages without tool results
   const finalResult: ModelMessage[] = [];
   let lastHadToolCalls = false;
@@ -554,20 +606,29 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: 
       });
     } else if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
       // Assistant message with tool calls
-      // IMPORTANT: Gemini requires text and tool calls to be in separate messages
-      // If there's both text and tool calls, split into two messages
+      // IMPORTANT: Combine text and tool calls into ONE message for Gemini compatibility
+      // Gemini does NOT support consecutive assistant messages (causes 400 error)
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
+      > = [];
+      
+      // Add text content first if present
       if (m.content && m.content.trim()) {
-        // First message: text only
-        result.push({ role: "assistant", content: m.content });
+        content.push({ type: "text", text: m.content });
       }
-      // Second message: tool calls only
-      const toolCallContent = m.toolCalls.map(tc => ({
-        type: "tool-call" as const,
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        input: tc.args,
-      }));
-      result.push({ role: "assistant", content: toolCallContent });
+      
+      // Add tool calls
+      for (const tc of m.toolCalls) {
+        content.push({
+          type: "tool-call",
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          input: tc.args,
+        });
+      }
+      
+      result.push({ role: "assistant", content });
     } else if (m.role === "user" || m.role === "assistant") {
       // Regular user or assistant message
       result.push({ role: m.role, content: m.content });
@@ -986,7 +1047,16 @@ export async function runAgent(options: {
     const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
-    context.history = history.getAll();
+    
+    // Re-validate after trimming - trimming can create orphaned tool results at the start
+    // This is crucial: we must validate AFTER History.trim() has run
+    let historyMessages = history.getAll();
+    if (settings.chatModel.provider === "google") {
+      historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
+    }
+    context.history = historyMessages;
+  }
+    context.history = historyMessages;
   }
 
   // Build tools: base + optional MCP tools from project .meta/mcp
@@ -1324,7 +1394,13 @@ export async function runAgentText(options: {
     const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
-    context.history = history.getAll();
+    let historyMessages = history.getAll();
+    
+    // Re-validate after trimming - trimming can create orphaned tool results at the start
+    if (settings.chatModel.provider === "google") {
+      historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
+    }
+    context.history = historyMessages;
   }
 
   const baseTools = await createAgentTools(context, settings);
