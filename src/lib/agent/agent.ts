@@ -1056,8 +1056,6 @@ export async function runAgent(options: {
     }
     context.history = historyMessages;
   }
-    context.history = historyMessages;
-  }
 
   // Build tools: base + optional MCP tools from project .meta/mcp
   const baseTools = await createAgentTools(context, settings);
@@ -1079,6 +1077,8 @@ export async function runAgent(options: {
     chatId: options.chatId,
     agentNumber: options.agentNumber,
     tools: toolNames,
+    userTimezone: context.data?.userTimezone as string | undefined,
+    userLocale: context.data?.userLocale as string | undefined,
   });
 
   // Append user message to history
@@ -1421,6 +1421,8 @@ export async function runAgentText(options: {
     chatId: options.chatId,
     agentNumber: options.agentNumber,
     tools: toolNames,
+    userTimezone: context.data?.userTimezone as string | undefined,
+    userLocale: context.data?.userLocale as string | undefined,
   });
 
   const messages: ModelMessage[] = [
@@ -1555,6 +1557,8 @@ export async function runSubordinateAgent(options: {
     projectId: options.projectId,
     agentNumber: context.agentNumber,
     tools: toolNames,
+    userTimezone: context.data?.userTimezone as string | undefined,
+    userLocale: context.data?.userLocale as string | undefined,
   });
 
   // Include relevant parent history for context
