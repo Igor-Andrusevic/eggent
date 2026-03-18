@@ -499,18 +499,23 @@ async function sendTelegramChatAction(
   }
 }
 
-function helpText(activeProject?: { id?: string; name?: string }): string {
+function helpText(activeProject?: { id?: string; name?: string }, userTimezone?: string): string {
   const activeProjectLine = activeProject?.id
     ? `Active project: ${activeProject.name ? `${activeProject.name} (${activeProject.id})` : activeProject.id}`
     : "Active project: not selected";
+  const timezoneLine = userTimezone 
+    ? `Your timezone: ${userTimezone}`
+    : "Your timezone: not set (server time will be used)";
   return [
     "Telegram connection is active.",
     activeProjectLine,
+    timezoneLine,
     "",
     "Commands:",
     "/start - show this help",
     "/help - show this help",
     "/code <access_code> - activate access for your Telegram user",
+    "/timezone <timezone> - set your timezone (e.g., /timezone Europe/Riga)",
     "/new - start a new conversation (reset context)",
     "",
     "Text messages are sent to the agent.",
@@ -668,10 +673,13 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage(
         botToken,
         chatId,
-        helpText({
-          id: resolvedProject.resolvedProjectId,
-          name: resolvedProject.projectName,
-        }),
+        helpText(
+          {
+            id: resolvedProject.resolvedProjectId,
+            name: resolvedProject.projectName,
+          },
+          resolvedProject.session.userTimezone
+        ),
         messageId
       );
       return Response.json({ ok: true, command });
@@ -687,6 +695,51 @@ export async function POST(req: NextRequest) {
         messageId
       );
       return Response.json({ ok: true, command });
+    }
+
+    if (command === "/timezone") {
+      const timezoneArg = text.slice("/timezone".length).trim();
+      if (!timezoneArg) {
+        const session = await getOrCreateExternalSession(sessionId);
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `Current timezone: ${session.userTimezone || "not set (server time used)"}\n\nUsage: /timezone <timezone>\nExample: /timezone Europe/Riga\n\nCommon timezones:\n- Europe/Riga (Latvia)\n- Europe/Moscow (Moscow)\n- Europe/London (London)\n- America/New_York (New York)\n- Asia/Tokyo (Tokyo)`,
+          messageId
+        );
+        return Response.json({ ok: true, command });
+      }
+      
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: timezoneArg });
+        const session = await getOrCreateExternalSession(sessionId);
+        session.userTimezone = timezoneArg;
+        session.updatedAt = new Date().toISOString();
+        await saveExternalSession(session);
+        
+        const now = new Date();
+        const localTime = now.toLocaleString("en", { 
+          timeZone: timezoneArg,
+          dateStyle: "full",
+          timeStyle: "short"
+        });
+        
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `✅ Timezone set to: ${timezoneArg}\n\nYour local time: ${localTime}`,
+          messageId
+        );
+        return Response.json({ ok: true, command, timezone: timezoneArg });
+      } catch {
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `❌ Invalid timezone: "${timezoneArg}"\n\nPlease use IANA timezone format.\nExample: /timezone Europe/Riga`,
+          messageId
+        );
+        return Response.json({ ok: true, command, error: "invalid_timezone" });
+      }
     }
 
     let incomingSavedFile:
@@ -832,6 +885,10 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Get user's timezone from session
+        const session = await getOrCreateExternalSession(sessionId);
+        const userTimezone = session.userTimezone;
+
         const result = await handleExternalMessage({
           sessionId,
           message: messageToSend,
@@ -844,6 +901,7 @@ export async function POST(req: NextRequest) {
               chatId,
               replyToMessageId: messageId ?? null,
             },
+            userTimezone,
           },
         });
 
