@@ -3,27 +3,37 @@
 <p align="center">
   <a href="./docs/assets/eggent-banner.png">
     <img src="./docs/assets/eggent-banner.png" alt="Eggent banner" width="980" />
-  </a>
 </p>
 
 Eggent is a local-first AI workspace for building a team of focused agents.
 
 Create specialized agents with their own skill packs and MCP servers, switch between them in plain human language, and delegate each task to the agent best trained for it.
 
-Built-in platform capabilities:
-- project-based organization
-- chat and tool-driven workflows
-- memory and knowledge ingestion
-- MCP server integration
-- cron automation
-- Telegram integration
+## Features
 
-The app runs as a Next.js service and stores runtime state on disk (`./data`).
+- **Multi-Agent Architecture** - Create specialized agents with unique skill packs
+- **Project-Based Organization** - Isolate contexts, files, and knowledge bases
+- **Memory & Knowledge** - Persistent vector storage with semantic search (RAG)
+- **MCP Integration** - Connect external tools via Model Context Protocol
+- **Cron Automation** - Schedule recurring tasks and reminders
+- **Telegram Integration** - Chat with agents from Telegram with automatic timezone detection
+- **Multi-Provider Support** - OpenAI, Anthropic, Google Gemini, and more
+
+## What's New in v0.1.3
+
+### Automatic Timezone Detection for Telegram
+
+Eggent now automatically detects user timezone based on their Telegram language settings:
+
+- **Language → Timezone Mapping**: Supports 30+ languages with intelligent timezone guessing
+- **Inline Confirmation**: Users confirm timezone with one tap on first message
+- **Per-User Storage**: Timezone preferences persist across sessions
+- **Exact Time Display**: No more rounding to the hour
+- **Time-Sensitive Task Handling**: Agent asks to confirm timezone before scheduling tasks
 
 ## Releases
 
-- Latest release snapshot: [0.1.3 - OAuth Native CLI Providers](./docs/releases/0.1.3-oauth-native-cli-providers.md)
-- GitHub release body : [v0.1.3](./docs/releases/github-v0.1.3.md)
+- Latest release: [0.1.3 - OAuth Native CLI Providers](./docs/releases/0.1.3-oauth-native-cli-providers.md)
 - Release archive: [docs/releases/README.md](./docs/releases/README.md)
 
 ## Contributing and Support
@@ -34,339 +44,125 @@ The app runs as a Next.js service and stores runtime state on disk (`./data`).
 - Code of conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 - Security policy: [SECURITY.md](./SECURITY.md)
 
-## Installation (All Supported Paths)
+## Installation
 
 | Path | Best for | Command |
 | --- | --- | --- |
 | One-command installer | Fastest setup, Docker-first | `curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh \| bash` |
-| Local production | Run directly on your machine (Node + npm) | `npm run setup:local` |
+| Local production | Run directly on your machine | `npm run setup:local` |
 | Docker isolated | Containerized runtime | `npm run setup:docker` |
-| Manual setup | Full control | see [Manual Setup](#manual-setup) |
+| Manual setup | Full control | See [Manual Setup](#manual-setup) |
 
-## 1) One-command Installer
+## Quick Start
+
+### 1. One-command Installer
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh | bash
 ```
 
 What it does:
-- installs Docker (best-effort on macOS/Linux) if missing
-- clones/updates Eggent in `~/.eggent`
-- runs Docker deployment via `scripts/install-docker.sh`
+- Installs Docker (if missing) on macOS/Linux
+- Clones/updates Eggent in `~/.eggent`
+- Runs Docker deployment
 
-Installer environment variables:
+Environment variables:
 - `EGGENT_INSTALL_DIR`: target directory (default: `~/.eggent`)
 - `EGGENT_BRANCH`: git branch (default: `main`)
-- `EGGENT_REPO_URL`: git repo URL (default: `https://github.com/eggent-ai/eggent.git`)
 - `EGGENT_AUTO_INSTALL_DOCKER`: `1`/`0` (default: `1`)
-- `EGGENT_APP_BIND_HOST`: Docker published bind host (`Linux default: 0.0.0.0`, otherwise `127.0.0.1`)
 
-Example:
-
-```bash
-EGGENT_INSTALL_DIR=~/apps/eggent \
-EGGENT_BRANCH=main \
-EGGENT_AUTO_INSTALL_DOCKER=1 \
-curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh | bash
-```
-
-On Linux (including VPS installs), the one-command installer publishes app port on all interfaces by default, so app is reachable at `http://<server-ip>:3000`.
-
-## 2) Local Production Setup (Node + npm)
+### 2. Docker Development
 
 ```bash
-npm run setup:local
-```
-
-This script:
-- validates Node/npm availability
-- validates `python3` availability (required for Code Execution with Python runtime)
-- validates `curl` availability (required for terminal commands like `curl ...`)
-- warns if recommended utilities are missing: `git`, `jq`, `pip3`, `rg`
-- creates `.env` from `.env.example` if needed
-- generates secure defaults for token placeholders
-- installs dependencies
-- builds production output
-- runs a health smoke-check
-
-Start the app:
-
-```bash
-npm run start
-```
-
-Open:
-- `http://localhost:3000`
-
-## 3) Docker Isolated Setup
-
-```bash
-npm run setup:docker
-```
-
-This script:
-- validates Docker + Compose
-- prepares `.env` and `data/`
-- builds image and starts container
-- waits for `GET /api/health` to succeed
-
-Open:
-- `http://localhost:3000`
-
-Useful Docker commands:
-
-```bash
+docker compose up --build
+docker compose build --no-cache app   # After dependency changes
 docker compose logs -f app
 docker compose restart app
-docker compose down
 ```
 
-## 4) Manual Setup
+### 3. Local Development
 
 ```bash
-cp .env.example .env
-# ensure python3 is installed and available in PATH
 npm install
+npm run dev              # http://localhost:3000
 npm run build
 npm run start
 ```
 
-Open:
-- `http://localhost:3000`
-
-## 5) Development Mode
-
-```bash
-npm install
-npm run dev
-```
-
-Open:
-- `http://localhost:3000`
-
-## Updating Eggent
-
-Before updating, back up:
-- `.env`
-- `data/`
-
-If you installed with the one-command installer, run the same command again:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh | bash
-```
-
-It will update the repo in `~/.eggent` (or `EGGENT_INSTALL_DIR` if customized), then rebuild and restart Docker deployment.
-
-If you run Eggent from this repo with Docker:
-
-```bash
-git pull --ff-only origin main
-npm run setup:docker
-```
-
-If you run Eggent from this repo in local production mode (Node + npm):
-
-```bash
-git pull --ff-only origin main
-npm run setup:local
-```
-
-Quick post-update check:
-
-```bash
-curl http://localhost:3000/api/health
-```
-
-## Runtime Scripts
-
-Defined in `package.json`:
-- `npm run dev`: Next.js dev server
-- `npm run build`: production build
-- `npm run start`: production start
-- `npm run lint`: ESLint
-- `npm run setup:one`: one-command installer wrapper
-- `npm run setup:local`: local production bootstrap
-- `npm run setup:docker`: Docker production bootstrap
-
 ## Configuration
 
-Base flow:
-- copy `.env.example` to `.env`
-- fill required keys
-
-Main environment variables:
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | Usually yes | Default model provider key |
-| `ANTHROPIC_API_KEY` | No | Anthropic provider |
-| `GOOGLE_API_KEY` | No | Google provider |
-| `OPENROUTER_API_KEY` | No | OpenRouter provider |
-| `TAVILY_API_KEY` | No | Web search integration |
-| `EXTERNAL_API_TOKEN` | No (auto-generated in setup scripts) | External message API auth token |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
-| `TELEGRAM_WEBHOOK_SECRET` | No (auto-generated in setup scripts) | Telegram webhook secret |
-| `TELEGRAM_DEFAULT_PROJECT_ID` | No | Default project for Telegram |
-| `TELEGRAM_ALLOWED_USER_IDS` | No | Comma/space separated Telegram `user_id` allowlist |
-| `APP_BASE_URL` | Recommended | Public app URL used by integrations |
-| `APP_BIND_HOST` | No | Docker port bind host (default: `127.0.0.1`; set `0.0.0.0` for public access) |
-| `APP_PORT` | No | Published app port (default: `3000`) |
-| `APP_TMP_DIR` | No | Docker temp directory passed as `TMPDIR` (default: `/app/data/tmp`) |
-| `PLAYWRIGHT_BROWSERS_PATH` | No | Browser install/cache path for Playwright (default: `/app/data/ms-playwright`) |
-| `NPM_CONFIG_CACHE` | No | npm cache directory for runtime installs (default: `/app/data/npm-cache`) |
-| `XDG_CACHE_HOME` | No | Generic CLI cache directory (default: `/app/data/.cache`) |
-| `CODEX_AUTH_FILE` | No | Explicit path to Codex OAuth file (if unset, Eggent auto-discovers `.codex/auth.json` in common home dirs) |
-| `GEMINI_OAUTH_CREDS_FILE` | No | Explicit path to Gemini OAuth creds file (if unset, Eggent auto-discovers `.gemini/oauth_creds.json` in common home dirs) |
-| `GEMINI_SETTINGS_FILE` | No | Explicit path to Gemini settings file (if unset, Eggent auto-discovers `.gemini/settings.json` in common home dirs) |
-
-## Data Persistence
-
-- Runtime state lives in `./data`
-- Docker mounts `./data` into `/app/data`
-- Runtime temp/cache paths are persisted under `./data` (for example: `tmp/`, `ms-playwright/`, `npm-cache/`, `.cache/`)
-- Keep backups of `data/` and `.env` for disaster recovery
-
-## Security Defaults
-
-Docker defaults are security-oriented:
-- compose default bind: `127.0.0.1:${APP_PORT:-3000}:3000` (`APP_BIND_HOST=0.0.0.0` exposes publicly)
-- non-root container user (`node`)
-- `node` user has passwordless `sudo` in container to allow AI-driven package installation
-
-## Health Check
+### Environment Variables (.env)
 
 ```bash
-curl http://localhost:3000/api/health
+# Required for Telegram integration
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_WEBHOOK_SECRET=your_webhook_secret
+APP_BASE_URL=https://your-domain.com  # Must be HTTPS for webhooks
+
+# AI Provider API Keys (at least one required)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=AIza...
+
+# Optional
+TELEGRAM_ADMIN_USER_IDS=123456789,987654321  # Comma-separated Telegram user IDs
+DEFAULT_TELEGRAM_PROJECT=ai  # Default project for Telegram messages
 ```
 
-Expected response shape:
-- `status: "ok"`
-- `timestamp`
-- `version`
+### Data Directory Structure
 
-## VPS Production Checklist
-
-1. Set at least one model API key in `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENROUTER_API_KEY`).
-2. Change default dashboard credentials (`admin / admin`) in Settings immediately after first login.
-3. If using Telegram integration/webhooks, set public `APP_BASE_URL` (HTTPS URL reachable from the internet).
-4. Keep `data/` persistent and writable by container runtime user.
-5. Ensure outbound network access to provider APIs (`443/tcp`).
-
-## Troubleshooting
-
-1. App works on `localhost` but not on `127.0.0.1` (or vice versa)  
-Use one host consistently. Browser storage/cookies are origin-scoped.
-
-2. Docker container does not become healthy  
-Run `docker compose logs --tail 200 app` and verify `.env` values.
-
-3. Codex/Gemini OAuth says "token file was not found" on VPS  
-Eggent auto-discovers OAuth files in common home directories and in `data/.codex` + `data/.gemini`.
-For Docker, place files in `data/.codex/auth.json`, `data/.gemini/oauth_creds.json`, `data/.gemini/settings.json`, then recreate container (`docker compose up -d --build --force-recreate app`) so startup hook can normalize file permissions for `node`.
-
-4. Linux Docker permissions issues  
-Try with `sudo docker ...` or add your user to the `docker` group.
-
-5. Build fails after dependency changes  
-Run `npm install` and retry `npm run build`.
-
-6. Large downloads fail with `No space left on device` despite free server disk  
-This usually means temp/cache paths are constrained in the runtime environment. Rebuild and restart with current compose defaults, then verify inside container:
-```bash
-docker compose build --no-cache app
-docker compose up -d app
-docker compose exec app sh -lc 'df -h /tmp /app/data && echo "TMPDIR=$TMPDIR" && echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"'
+```
+data/
+├── settings/
+│   ├── settings.json           # App settings (models, memory, search config)
+│   ├── telegram-integration.json
+│   └── project-access.json
+├── projects/<project-id>/
+│   ├── .meta/
+│   │   ├── knowledge/     # Files for RAG ingestion
+│   │   └── skills/         # Custom project skills
+│   └── memory/             # Vector DB
+├── external-sessions/      # Telegram session state
+├── user-preferences/       # Per-user timezone/locale storage
+├── chats/                  # Chat history
+└── chat-files/             # Uploaded files
 ```
 
-7. `Process error: spawn python3 ENOENT` in Code Execution  
-`python3` is missing in runtime environment.
+## Telegram Integration
 
-For Docker deploys:
-```bash
-docker compose build --no-cache app
-docker compose up -d app
-docker compose exec app python3 --version
-```
+Eggent integrates with Telegram for mobile access to your agents:
 
-For local (non-Docker) deploys:
-```bash
-sudo apt-get update && sudo apt-get install -y python3
-python3 --version
-```
+- **Webhook-based**: Real-time message handling
+- **Automatic File Import**: Documents sent via Telegram are automatically imported into knowledge base
+- **Voice Message Transcription**: Audio messages transcribed using Gemini Flash (free) or OpenAI Whisper
+- **Timezone Detection**: Automatic timezone detection based on user's language
+- **Access Control**: Whitelist-based user authorization
 
-8. `sh: 1: curl: not found` in Code Execution (terminal runtime)  
-`curl` is missing in runtime environment.
+### Telegram Commands
 
-For Docker deploys:
-```bash
-docker compose build --no-cache app
-docker compose up -d app
-docker compose exec app curl --version
-```
+| Command | Description |
+| --- | --- |
+| `/start` | Show help and current project |
+| `/help` | Show help |
+| `/new` | Start new conversation (reset context) |
+| `/timezone <tz>` | Set your timezone (e.g., `/timezone Europe/Rome`) |
 
-For local (non-Docker) deploys:
-```bash
-sudo apt-get update && sudo apt-get install -y curl
-curl --version
-```
+### Setting up Telegram
 
-9. `command not found` for common terminal/skill commands (`git`, `jq`, `rg`)  
-Install recommended CLI utilities:
-```bash
-sudo apt-get update && sudo apt-get install -y git jq ripgrep
-```
+1. Create a bot via [@BotFather](https://t.me/BotFather)
+2. Set your webhook URL: `https://your-domain.com/api/integrations/telegram/webhook`
+3. Configure `.env` with your bot token and webhook secret
+4. Add your Telegram user ID to `TELEGRAM_ADMIN_USER_IDS`
 
-10. `ModuleNotFoundError: No module named 'requests'` in Python Code Execution  
-`requests` is missing in runtime environment.
+## Tech Stack
 
-For Docker deploys:
-```bash
-docker compose build --no-cache app
-docker compose up -d app
-docker compose exec app python3 -c "import requests; print(requests.__version__)"
-```
+- **Framework**: Next.js 15 with App Router
+- **AI SDK**: Vercel AI SDK
+- **UI**: React 19, Tailwind CSS 4
+- **State**: Zustand
+- **Storage**: File-based JSON with vector embeddings
+- **Container**: Docker with multi-stage builds
 
-For local (non-Docker) deploys:
-```bash
-sudo apt-get update && sudo apt-get install -y python3-requests
-python3 -c "import requests; print(requests.__version__)"
-```
+## License
 
-11. `/usr/bin/python3: No module named pip` when trying to install Python packages  
-`pip` is missing in runtime environment.
-
-For Docker deploys:
-```bash
-docker compose build --no-cache app
-docker compose up -d app
-docker compose exec app python3 -m pip --version
-```
-
-For local (non-Docker) deploys:
-```bash
-sudo apt-get update && sudo apt-get install -y python3-pip
-python3 -m pip --version
-```
-
-12. `apt-get install ...` fails in Code Execution with `Permission denied`  
-Use sudo in terminal runtime:
-```bash
-sudo apt-get update && sudo apt-get install -y ffmpeg
-```
-
-## Project Layout (High Level)
-
-```text
-src/                # App code (Next.js app router, components, libs)
-scripts/            # Install and utility scripts
-bundled-skills/     # Built-in skill packs
-data/               # Runtime state (generated locally)
-docs/               # Additional docs
-docker-compose.yml  # Container runtime
-Dockerfile          # Multi-stage production image build
-```
-
-## Notes
-
-- License: MIT. See `LICENSE` at the repository root.
+MIT License - see [LICENSE](LICENSE)
