@@ -79,10 +79,21 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("Chat API error:", error);
+    
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
+    
+    if (errorMessage.includes("Insufficient balance") || errorMessage.includes("Please recharge")) {
+      return Response.json(
+        {
+          error: "Недостаточно баланса на аккаунте AI-провайдера. Пожалуйста, пополните счёт.",
+        },
+        { status: 429 }
+      );
+    }
+    
     return Response.json(
       {
-        error:
-          error instanceof Error ? error.message : "Internal server error",
+        error: errorMessage,
       },
       { status: 500 }
     );
