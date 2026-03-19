@@ -203,31 +203,56 @@ export async function buildSystemPrompt(options: {
     }
   }
 
-  // 6. Current date/time (rounded to the hour for prompt caching)
+  // 6. Current date/time (exact time for better accuracy)
   const now = new Date();
-  now.setMinutes(0, 0, 0);
   const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const effectiveTimezone = options.userTimezone || serverTimezone;
   const effectiveLocale = options.userLocale || "en";
   
+  const serverTimeStr = now.toLocaleString("en", {
+    timeZone: "UTC",
+    dateStyle: "full",
+    timeStyle: "short"
+  });
+  
   let userTimeStr: string;
+  let userTimeExact: string;
   try {
     userTimeStr = now.toLocaleString(effectiveLocale, { 
       timeZone: effectiveTimezone,
       dateStyle: "full",
       timeStyle: "short"
     });
+    userTimeExact = now.toLocaleString("en", {
+      timeZone: effectiveTimezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
   } catch {
-    userTimeStr = now.toISOString().slice(0, 13) + ":00:00Z";
+    userTimeStr = serverTimeStr;
+    userTimeExact = now.toLocaleString("en", {
+      timeZone: "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
   }
   
-  const serverTimeStr = now.toISOString().slice(0, 13) + ":00:00Z";
+  const hasUserTimezone = !!options.userTimezone;
   
   parts.push(
     `\n## Current Information\n` +
-    `- User's Local Time: ${userTimeStr} (${effectiveTimezone})\n` +
-    `- Server Time: ${serverTimeStr} (${serverTimezone})\n` +
-    `- User's Locale: ${effectiveLocale}`
+    `- Current Time (Server): ${serverTimeStr}\n` +
+    `- User Local Time: ${userTimeExact} (${effectiveTimezone})\n` +
+    `- Full Date: ${userTimeStr}\n` +
+    `- User's Locale: ${effectiveLocale}\n` +
+    `- Timezone Confirmed: ${hasUserTimezone ? "Yes" : "No (using server timezone)"}\n\n` +
+    `IMPORTANT TIME HANDLING RULES:\n` +
+    `1. When asked about current time, use: ${userTimeExact} in ${effectiveTimezone} timezone.\n` +
+    `2. If the user asks about time-sensitive tasks (reminders, scheduling, deadlines), first clarify their timezone if not confirmed.\n` +
+    `3. Before scheduling anything, verify: "Уточните, пожалуйста, ваш часовой пояс корректен: ${effectiveTimezone}?"\n` +
+    `4. For exact current time and date, always use the values above.`
   );
 
   return parts.join("\n\n");

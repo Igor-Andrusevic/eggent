@@ -334,6 +334,8 @@ export function ChatPanel() {
           chatId: internalChatIdRef.current,
           projectId: activeProjectIdRef.current,
           currentPath: currentPathRef.current,
+          userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          userLocale: navigator.language,
         }),
       }),
     []
