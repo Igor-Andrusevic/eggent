@@ -1587,10 +1587,13 @@ export function createModel(
     }
 
     case "zhipuai": {
+      const zhipuaiBaseUrl = config.model === "glm-5-turbo"
+        ? "https://api.z.ai/api/paas/v4/"
+        : "https://api.z.ai/api/coding/paas/v4/";
       return createOpenAICompatibleChatModel(config, {
         providerName: "zhipuai",
         apiKey: config.apiKey || process.env.ZHIPUAI_API_KEY || "",
-        fallbackBaseUrl: "https://api.z.ai/api/coding/paas/v4/",
+        fallbackBaseUrl: zhipuaiBaseUrl,
         defaultPath: "/",
       });
     }
