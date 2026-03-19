@@ -221,6 +221,8 @@ export async function importKnowledge(
   return result;
 }
 
+const VOICE_FILE_PATTERN = /^voice-\d+\.ogg$/i;
+
 /**
  * Query the knowledge base
  */
@@ -237,6 +239,8 @@ export async function queryKnowledge(
   }> = [];
 
   console.log(`[Knowledge] Querying subdirs: ${knowledgeSubdirs.join(", ")}, query: "${query}", limit: ${limit}`);
+
+  const isVoiceFileQuery = VOICE_FILE_PATTERN.test(query.trim());
 
   for (const subdir of knowledgeSubdirs) {
     try {
@@ -257,6 +261,27 @@ export async function queryKnowledge(
   }
 
   console.log(`[Knowledge] Total results from all subdirs: ${allResults.length}`);
+
+  if (allResults.length === 0 && isVoiceFileQuery) {
+    console.log(`[Knowledge] Voice file query returned no results, retrying with empty query for latest documents`);
+    for (const subdir of knowledgeSubdirs) {
+      try {
+        const results = await searchMemory(
+          "",
+          limit,
+          settings.memory.similarityThreshold,
+          subdir,
+          settings,
+          "knowledge"
+        );
+        console.log(`[Knowledge] Fallback: Subdir ${subdir} returned ${results.length} results`);
+        allResults.push(...results);
+      } catch (error) {
+        console.log(`[Knowledge] Fallback error searching subdir ${subdir}: ${error}`);
+      }
+    }
+    console.log(`[Knowledge] Fallback total results: ${allResults.length}`);
+  }
 
   if (allResults.length === 0) {
     return "No relevant documents found in the knowledge base.";
