@@ -252,13 +252,28 @@ export async function handleExternalMessage(
   const beforeChat = await getChat(resolvedChatId);
   const beforeCount = beforeChat?.messages.length ?? 0;
 
-  const reply = await runAgentText({
-    chatId: resolvedChatId,
-    userMessage: message,
-    projectId: resolvedProjectId,
-    currentPath: currentPath || undefined,
-    runtimeData: input.runtimeData,
-  });
+  let reply: string;
+  try {
+    reply = await runAgentText({
+      chatId: resolvedChatId,
+      userMessage: message,
+      projectId: resolvedProjectId,
+      currentPath: currentPath || undefined,
+      runtimeData: input.runtimeData,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    if (errorMessage.includes("Insufficient balance") || errorMessage.includes("Please recharge")) {
+      throw new ExternalMessageError(429, {
+        error: "Недостаточно баланса на аккаунте AI-провайдера. Пожалуйста, пополните счёт.",
+      });
+    }
+    
+    throw new ExternalMessageError(500, {
+      error: `Ошибка AI: ${errorMessage}`,
+    });
+  }
 
   const afterChat = await getChat(resolvedChatId);
   const newMessages = afterChat?.messages.slice(beforeCount) ?? [];
