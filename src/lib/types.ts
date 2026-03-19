@@ -15,7 +15,8 @@ export interface ModelConfig {
     | "ollama"
     | "custom"
     | "codex-cli"
-    | "gemini-cli";
+    | "gemini-cli"
+    | "zhipuai";
   model: string;
   apiKey?: string;
   authMethod?: ChatAuthMethod;
