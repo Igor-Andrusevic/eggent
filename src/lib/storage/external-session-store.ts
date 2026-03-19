@@ -8,6 +8,7 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9._:-]{1,128}$/;
 
 export interface ExternalSession {
   id: string;
+  userId?: string;
   activeProjectId: string | null;
   activeChats: Record<string, string>;
   currentPaths: Record<string, string>;
@@ -49,6 +50,7 @@ export async function getExternalSession(
     const parsed = JSON.parse(raw) as ExternalSession;
     return {
       id: parsed.id,
+      userId: parsed.userId,
       activeProjectId: parsed.activeProjectId ?? null,
       activeChats:
         parsed.activeChats && typeof parsed.activeChats === "object"

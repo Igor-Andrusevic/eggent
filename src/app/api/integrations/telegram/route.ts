@@ -38,6 +38,20 @@ import {
   getFirstAccessibleProject,
   ensureUserHasProjectAccess,
 } from "@/lib/storage/project-access-store";
+import {
+  getUserPreferences,
+  getOrCreateUserPreferences,
+  saveUserPreferences,
+  updateUserTimezone,
+  updateUserLocale,
+  markTimezoneAsked,
+  type UserPreferences,
+} from "@/lib/storage/user-preferences-store";
+import {
+  guessTimezoneFromLanguage,
+  isValidTimezone,
+  POPULAR_TIMEZONES,
+} from "@/lib/utils/language-timezone-map";
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_FILE_MAX_BYTES = 30 * 1024 * 1024;
@@ -45,6 +59,22 @@ const TELEGRAM_FILE_MAX_BYTES = 30 * 1024 * 1024;
 interface TelegramUpdate {
   update_id?: unknown;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+interface TelegramCallbackQuery {
+  id?: unknown;
+  from?: {
+    id?: unknown;
+    language_code?: unknown;
+  };
+  message?: {
+    message_id?: unknown;
+    chat?: {
+      id?: unknown;
+    };
+  };
+  data?: unknown;
 }
 
 interface TelegramMessage {
@@ -53,6 +83,7 @@ interface TelegramMessage {
   caption?: unknown;
   from?: {
     id?: unknown;
+    language_code?: unknown;
   };
   chat?: {
     id?: unknown;
@@ -140,6 +171,79 @@ async function callTelegramApi(
     throw new Error(parseTelegramError(response.status, payload));
   }
   return payload;
+}
+
+async function sendTelegramMessageWithInlineButtons(
+  botToken: string,
+  chatId: number,
+  text: string,
+  buttons: Array<Array<{ text: string; callback_data: string }>>,
+  replyToMessageId?: number
+): Promise<void> {
+  await callTelegramApi(botToken, "sendMessage", {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    reply_to_message_id: replyToMessageId,
+    reply_markup: {
+      inline_keyboard: buttons,
+    },
+  });
+}
+
+async function answerCallbackQuery(
+  botToken: string,
+  callbackQueryId: string,
+  text?: string
+): Promise<void> {
+  await callTelegramApi(botToken, "answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text: text || "",
+  });
+}
+
+async function sendTimezoneConfirmationMessage(
+  botToken: string,
+  chatId: number,
+  timezoneGuess: { timezone: string; displayName: string; utcOffset: string }
+): Promise<void> {
+  const now = new Date();
+  const localTime = now.toLocaleString("ru", {
+    timeZone: timezoneGuess.timezone,
+    dateStyle: "full",
+    timeStyle: "short",
+  });
+
+  const text = `🌍 <b>Определение часового пояса</b>\n\n` +
+    `По вашему языку предполагаю часовой пояс: <b>${timezoneGuess.displayName}</b> (${timezoneGuess.utcOffset})\n\n` +
+    `Сейчас там: <b>${localTime}</b>\n\n` +
+    `Это правильный часовой пояс?`;
+
+  const buttons = [
+    [
+      { text: "✅ Да, верно", callback_data: `tz_confirm:${timezoneGuess.timezone}` },
+    ],
+    [
+      { text: "🔄 Выбрать другой", callback_data: "tz_select_other" },
+    ],
+  ];
+
+  await sendTelegramMessageWithInlineButtons(botToken, chatId, text, buttons);
+}
+
+async function sendTimezoneSelectionMessage(
+  botToken: string,
+  chatId: number
+): Promise<void> {
+  const text = `🌍 <b>Выберите часовой пояс:</b>\n\n` +
+    `Или введите команду /timezone <часовой_пояс>\n` +
+    `Например: /timezone Europe/Rome`;
+
+  const buttons = POPULAR_TIMEZONES.slice(0, 12).map((tz) => [
+    { text: `${tz.name} (${tz.offset})`, callback_data: `tz_select:${tz.id}` },
+  ]);
+
+  await sendTelegramMessageWithInlineButtons(botToken, chatId, text, buttons);
 }
 
 function safeTokenMatch(actual: string, expected: string): boolean {
@@ -577,6 +681,100 @@ export async function POST(req: NextRequest) {
       return Response.json({ ok: true, duplicate: true });
     }
 
+    // Handle callback_query (inline button clicks)
+    const callbackQuery = body.callback_query;
+    if (callbackQuery) {
+      const callbackQueryId = typeof callbackQuery.id === "string" ? callbackQuery.id : String(callbackQuery.id ?? "");
+      const callbackData = typeof callbackQuery.data === "string" ? callbackQuery.data : "";
+      const callbackChatId = typeof callbackQuery.message?.chat?.id === "number" 
+        ? callbackQuery.message.chat.id 
+        : null;
+      const callbackUserId = normalizeTelegramUserId(callbackQuery?.from?.id);
+
+      if (!callbackUserId || !callbackChatId) {
+        await answerCallbackQuery(botToken, callbackQueryId, "Error: invalid user or chat");
+        return Response.json({ ok: true, callback: true, error: "invalid_callback" });
+      }
+
+      try {
+        if (callbackData.startsWith("tz_confirm:")) {
+          const timezone = callbackData.slice("tz_confirm:".length);
+          if (isValidTimezone(timezone)) {
+            await updateUserTimezone(callbackUserId, timezone, "confirmed");
+            
+            const sessionId = await getTelegramChatSessionId(botId, callbackChatId);
+            if (sessionId) {
+              const session = await getOrCreateExternalSession(sessionId);
+              session.userTimezone = timezone;
+              session.userId = callbackUserId;
+              await saveExternalSession(session);
+            }
+
+            const now = new Date();
+            const localTime = now.toLocaleString("ru", {
+              timeZone: timezone,
+              dateStyle: "full",
+              timeStyle: "short",
+            });
+
+            await answerCallbackQuery(botToken, callbackQueryId, "✅ Часовой пояс сохранён!");
+            await sendTelegramMessage(
+              botToken,
+              callbackChatId,
+              `✅ <b>Часовой пояс установлен: ${timezone}</b>\n\nВаше местное время: ${localTime}`
+            );
+            return Response.json({ ok: true, callback: true, action: "tz_confirmed" });
+          } else {
+            await answerCallbackQuery(botToken, callbackQueryId, "❌ Неверный часовой пояс");
+            return Response.json({ ok: true, callback: true, error: "invalid_timezone" });
+          }
+        }
+
+        if (callbackData === "tz_select_other") {
+          await answerCallbackQuery(botToken, callbackQueryId);
+          await sendTimezoneSelectionMessage(botToken, callbackChatId);
+          return Response.json({ ok: true, callback: true, action: "tz_select_other" });
+        }
+
+        if (callbackData.startsWith("tz_select:")) {
+          const timezone = callbackData.slice("tz_select:".length);
+          if (isValidTimezone(timezone)) {
+            await updateUserTimezone(callbackUserId, timezone, "confirmed");
+            
+            const sessionId = await getTelegramChatSessionId(botId, callbackChatId);
+            if (sessionId) {
+              const session = await getOrCreateExternalSession(sessionId);
+              session.userTimezone = timezone;
+              session.userId = callbackUserId;
+              await saveExternalSession(session);
+            }
+
+            const now = new Date();
+            const localTime = now.toLocaleString("ru", {
+              timeZone: timezone,
+              dateStyle: "full",
+              timeStyle: "short",
+            });
+
+            await answerCallbackQuery(botToken, callbackQueryId, "✅ Часовой пояс сохранён!");
+            await sendTelegramMessage(
+              botToken,
+              callbackChatId,
+              `✅ <b>Часовой пояс установлен: ${timezone}</b>\n\nВаше местное время: ${localTime}`
+            );
+            return Response.json({ ok: true, callback: true, action: "tz_selected" });
+          }
+        }
+
+        await answerCallbackQuery(botToken, callbackQueryId, "Неизвестное действие");
+        return Response.json({ ok: true, callback: true, error: "unknown_callback" });
+      } catch (error) {
+        console.error("Callback query handling error:", error);
+        await answerCallbackQuery(botToken, callbackQueryId, "Произошла ошибка");
+        return Response.json({ ok: true, callback: true, error: "callback_error" });
+      }
+    }
+
     const message = body.message;
     const chatId =
       typeof message?.chat?.id === "number" || typeof message?.chat?.id === "string"
@@ -599,6 +797,9 @@ export async function POST(req: NextRequest) {
       typeof message?.caption === "string" ? message.caption.trim() : "";
     const incomingText = text || caption;
     const fromUserId = normalizeTelegramUserId(message?.from?.id);
+    const userLanguageCode = typeof message?.from?.language_code === "string" 
+      ? message.from.language_code 
+      : undefined;
 
     if (!fromUserId) {
       return Response.json({
@@ -659,6 +860,48 @@ export async function POST(req: NextRequest) {
       await setTelegramChatSessionId(botId, chatId, sessionId);
     }
 
+    // Get or create user preferences and session
+    const userPrefs = await getOrCreateUserPreferences(fromUserId);
+    let session = await getOrCreateExternalSession(sessionId);
+    
+    // Link session to user
+    if (session.userId !== fromUserId) {
+      session.userId = fromUserId;
+      session.updatedAt = new Date().toISOString();
+      await saveExternalSession(session);
+    }
+
+    // Update locale from Telegram message
+    if (userLanguageCode && userPrefs.userLocale !== userLanguageCode) {
+      await updateUserLocale(fromUserId, userLanguageCode);
+    }
+    if (userLanguageCode && session.userLocale !== userLanguageCode) {
+      session.userLocale = userLanguageCode;
+      session.updatedAt = new Date().toISOString();
+      await saveExternalSession(session);
+    }
+
+    // Copy timezone from user preferences to session if not set
+    if (!session.userTimezone && userPrefs.userTimezone) {
+      session.userTimezone = userPrefs.userTimezone;
+      session.updatedAt = new Date().toISOString();
+      await saveExternalSession(session);
+    }
+
+    // Check if we need to ask about timezone
+    let shouldAskTimezone = false;
+    if (
+      !userPrefs.userTimezone &&
+      userPrefs.timezoneDetected !== "confirmed" &&
+      userPrefs.timezoneDetected !== "pending" &&
+      userLanguageCode
+    ) {
+      const tzGuess = guessTimezoneFromLanguage(userLanguageCode);
+      if (tzGuess && tzGuess.confidence === "high") {
+        shouldAskTimezone = true;
+      }
+    }
+
     const command = extractCommand(text);
     if (command === "/start" || command === "/help") {
       const resolvedProject = await resolveTelegramProjectContext({
@@ -688,6 +931,19 @@ export async function POST(req: NextRequest) {
     if (command === "/new") {
       const freshSessionId = createFreshTelegramSessionId(botId, chatId);
       await setTelegramChatSessionId(botId, chatId, freshSessionId);
+      
+      // Copy user preferences to new session
+      const freshSession = await getOrCreateExternalSession(freshSessionId);
+      freshSession.userId = fromUserId;
+      if (userPrefs.userTimezone) {
+        freshSession.userTimezone = userPrefs.userTimezone;
+      }
+      if (userPrefs.userLocale || userLanguageCode) {
+        freshSession.userLocale = userPrefs.userLocale || userLanguageCode;
+      }
+      freshSession.updatedAt = new Date().toISOString();
+      await saveExternalSession(freshSession);
+      
       await sendTelegramMessage(
         botToken,
         chatId,
@@ -700,11 +956,13 @@ export async function POST(req: NextRequest) {
     if (command === "/timezone") {
       const timezoneArg = text.slice("/timezone".length).trim();
       if (!timezoneArg) {
-        const session = await getOrCreateExternalSession(sessionId);
+        const currentSession = await getOrCreateExternalSession(sessionId);
+        const prefs = await getUserPreferences(fromUserId);
+        const effectiveTimezone = currentSession.userTimezone || prefs?.userTimezone || "not set (server time used)";
         await sendTelegramMessage(
           botToken,
           chatId,
-          `Current timezone: ${session.userTimezone || "not set (server time used)"}\n\nUsage: /timezone <timezone>\nExample: /timezone Europe/Riga\n\nCommon timezones:\n- Europe/Riga (Latvia)\n- Europe/Moscow (Moscow)\n- Europe/London (London)\n- America/New_York (New York)\n- Asia/Tokyo (Tokyo)`,
+          `Current timezone: ${effectiveTimezone}\n\nUsage: /timezone <timezone>\nExample: /timezone Europe/Riga\n\nCommon timezones:\n- Europe/Riga (Latvia)\n- Europe/Moscow (Moscow)\n- Europe/Rome (Italy)\n- Europe/London (London)\n- America/New_York (New York)\n- Asia/Tokyo (Tokyo)`,
           messageId
         );
         return Response.json({ ok: true, command });
@@ -712,13 +970,17 @@ export async function POST(req: NextRequest) {
       
       try {
         Intl.DateTimeFormat(undefined, { timeZone: timezoneArg });
-        const session = await getOrCreateExternalSession(sessionId);
-        session.userTimezone = timezoneArg;
-        session.updatedAt = new Date().toISOString();
-        await saveExternalSession(session);
+        
+        // Save to both session and user preferences
+        const currentSession = await getOrCreateExternalSession(sessionId);
+        currentSession.userTimezone = timezoneArg;
+        currentSession.updatedAt = new Date().toISOString();
+        await saveExternalSession(currentSession);
+        
+        await updateUserTimezone(fromUserId, timezoneArg, "confirmed");
         
         const now = new Date();
-        const localTime = now.toLocaleString("en", { 
+        const localTime = now.toLocaleString("ru", { 
           timeZone: timezoneArg,
           dateStyle: "full",
           timeStyle: "short"
@@ -727,7 +989,7 @@ export async function POST(req: NextRequest) {
         await sendTelegramMessage(
           botToken,
           chatId,
-          `✅ Timezone set to: ${timezoneArg}\n\nYour local time: ${localTime}`,
+          `✅ Часовой пояс установлен: ${timezoneArg}\n\nВаше местное время: ${localTime}`,
           messageId
         );
         return Response.json({ ok: true, command, timezone: timezoneArg });
@@ -735,10 +997,20 @@ export async function POST(req: NextRequest) {
         await sendTelegramMessage(
           botToken,
           chatId,
-          `❌ Invalid timezone: "${timezoneArg}"\n\nPlease use IANA timezone format.\nExample: /timezone Europe/Riga`,
+          `❌ Неверный часовой пояс: "${timezoneArg}"\n\nИспользуйте формат IANA.\nПример: /timezone Europe/Riga`,
           messageId
         );
         return Response.json({ ok: true, command, error: "invalid_timezone" });
+      }
+    }
+
+    // Ask about timezone if needed (only for non-command messages)
+    if (shouldAskTimezone && !command && userLanguageCode) {
+      const tzGuess = guessTimezoneFromLanguage(userLanguageCode);
+      if (tzGuess) {
+        await markTimezoneAsked(fromUserId);
+        await sendTimezoneConfirmationMessage(botToken, chatId, tzGuess);
+        // Continue processing the message, don't return
       }
     }
 
@@ -885,9 +1157,11 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Get user's timezone from session
-        const session = await getOrCreateExternalSession(sessionId);
-        const userTimezone = session.userTimezone;
+        // Get user's timezone and locale from session (with user preferences fallback)
+        const currentSession = await getOrCreateExternalSession(sessionId);
+        const currentUserPrefs = await getUserPreferences(fromUserId);
+        const userTimezone = currentSession.userTimezone || currentUserPrefs?.userTimezone;
+        const userLocale = currentSession.userLocale || currentUserPrefs?.userLocale || userLanguageCode;
 
         const result = await handleExternalMessage({
           sessionId,
@@ -902,6 +1176,7 @@ export async function POST(req: NextRequest) {
               replyToMessageId: messageId ?? null,
             },
             userTimezone,
+            userLocale,
           },
         });
 

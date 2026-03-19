@@ -1009,6 +1009,8 @@ export async function runAgent(options: {
   projectId?: string;
   currentPath?: string;
   agentNumber?: number;
+  userTimezone?: string;
+  userLocale?: string;
 }) {
   const settings = await getSettings();
   const providerOptions = resolveModelProviderOptions(settings.chatModel.provider);
@@ -1032,6 +1034,8 @@ export async function runAgent(options: {
     agentNumber: options.agentNumber ?? 0,
     data: {
       currentUserMessage: options.userMessage,
+      userTimezone: options.userTimezone,
+      userLocale: options.userLocale,
     },
   };
 
