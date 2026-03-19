@@ -130,6 +130,7 @@ export const MODEL_PROVIDERS: Record<string, ProviderConfig> = {
   "zhipuai": {
     name: "Zhipu AI (GLM)",
     models: [
+      { id: "glm-5-turbo", name: "GLM-5 Turbo" },
       { id: "glm-5", name: "GLM-5 (Coding Plan)" },
       { id: "glm-4.7-flash", name: "GLM-4.7 Flash (FREE)" },
       { id: "glm-4.5-flash", name: "GLM-4.5 Flash (FREE)" },
