@@ -55,6 +55,7 @@ import {
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_FILE_MAX_BYTES = 30 * 1024 * 1024;
+const RESERVED_COMMANDS = new Set(["/start", "/help", "/new", "/timezone", "/code"]);
 
 interface TelegramUpdate {
   update_id?: unknown;
@@ -621,6 +622,7 @@ function helpText(activeProject?: { id?: string; name?: string }, userTimezone?:
     "/code <access_code> - activate access for your Telegram user",
     "/timezone <timezone> - set your timezone (e.g., /timezone Europe/Riga)",
     "/new - start a new conversation (reset context)",
+    "/<project_name> - switch project (e.g., /family)",
     "",
     "Text messages are sent to the agent.",
     "File uploads are saved into chat files.",
@@ -1001,6 +1003,69 @@ export async function POST(req: NextRequest) {
           messageId
         );
         return Response.json({ ok: true, command, error: "invalid_timezone" });
+      }
+    }
+
+    // Handle /<project_name> for quick project switching
+    if (command && !RESERVED_COMMANDS.has(command)) {
+      const projectNameArg = text.slice(command.length).trim() || command.slice(1);
+      if (projectNameArg) {
+        const allProjects = await getAllProjects();
+        const accessibleProjects = await getAccessibleProjects(allProjects, fromUserId);
+        const nameQuery = projectNameArg.toLowerCase();
+
+        let target = accessibleProjects.find(
+          (p) => p.name.trim().toLowerCase() === nameQuery || p.id.trim().toLowerCase() === nameQuery
+        );
+
+        if (!target) {
+          const partialMatches = accessibleProjects.filter(
+            (p) => p.name.toLowerCase().includes(nameQuery) || p.id.toLowerCase().includes(nameQuery)
+          );
+          if (partialMatches.length === 1) {
+            target = partialMatches[0];
+          } else if (partialMatches.length > 1) {
+            await sendTelegramMessage(
+              botToken,
+              chatId,
+              `❌ Найдено несколько проектов:\n${partialMatches.map((p) => `• ${p.name} (${p.id})`).join("\n")}\n\nУточните имя.`,
+              messageId
+            );
+            return Response.json({ ok: true, command, error: "ambiguous_project" });
+          }
+        }
+
+        if (target) {
+          const session = await getOrCreateExternalSession(sessionId);
+          session.activeProjectId = target.id;
+          session.updatedAt = new Date().toISOString();
+          await saveExternalSession(session);
+
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            `✅ Переключился на проект: ${target.name} (${target.id})`,
+            messageId
+          );
+          return Response.json({ ok: true, command, projectId: target.id });
+        }
+
+        if (accessibleProjects.length > 0) {
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            `❌ Проект "${projectNameArg}" не найден.\n\nДоступные проекты:\n${accessibleProjects.map((p) => `• ${p.name} (${p.id})`).join("\n")}`,
+            messageId
+          );
+        } else {
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            `❌ Проект "${projectNameArg}" не найден. У вас нет доступных проектов.`,
+            messageId
+          );
+        }
+        return Response.json({ ok: true, command, error: "project_not_found" });
       }
     }
 
