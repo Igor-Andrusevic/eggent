@@ -57,6 +57,12 @@ const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_FILE_MAX_BYTES = 30 * 1024 * 1024;
 const RESERVED_COMMANDS = new Set(["/start", "/help", "/new", "/timezone", "/code"]);
 
+const PROJECT_ALIASES: Record<string, string> = {
+  "/family": "Семья",
+  "/work": "Работа",
+  "/monitoring": "Сервер - Мониторинг",
+};
+
 interface TelegramUpdate {
   update_id?: unknown;
   message?: TelegramMessage;
@@ -622,7 +628,9 @@ function helpText(activeProject?: { id?: string; name?: string }, userTimezone?:
     "/code <access_code> - activate access for your Telegram user",
     "/timezone <timezone> - set your timezone (e.g., /timezone Europe/Riga)",
     "/new - start a new conversation (reset context)",
-    "/<project_name> - switch project (e.g., /family)",
+    "/family - switch to project: Семья",
+    "/work - switch to project: Работа",
+    "/monitoring - switch to project: Сервер - Мониторинг",
     "",
     "Text messages are sent to the agent.",
     "File uploads are saved into chat files.",
@@ -1008,7 +1016,8 @@ export async function POST(req: NextRequest) {
 
     // Handle /<project_name> for quick project switching
     if (command && !RESERVED_COMMANDS.has(command)) {
-      const projectNameArg = text.slice(command.length).trim() || command.slice(1);
+      const aliasTarget = PROJECT_ALIASES[command];
+      const projectNameArg = aliasTarget || text.slice(command.length).trim() || command.slice(1);
       if (projectNameArg) {
         const allProjects = await getAllProjects();
         const accessibleProjects = await getAccessibleProjects(allProjects, fromUserId);
