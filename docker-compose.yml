@@ -24,6 +24,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./bundled-skills:/app/bundled-skills
+      # last30days X auth cookies
+      - ~/.config/last30days/.env:/home/node/.config/last30days/.env:ro
       # Host monitoring (read-only)
       - /var/log:/host/var/log:ro
       - /proc:/host/proc:ro
