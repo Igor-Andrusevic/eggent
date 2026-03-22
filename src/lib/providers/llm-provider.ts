@@ -1548,6 +1548,23 @@ function createOpenAICompatibleFetch(dropAuthorization: boolean) {
   };
 }
 
+function createZhipuaiFetchWrapper(): typeof fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST" && init.body) {
+      try {
+        const body = JSON.parse(init.body as string);
+        if (!body.thinking) {
+          body.thinking = { type: "disabled" };
+        }
+        init = { ...init, body: JSON.stringify(body) };
+      } catch {
+        // If parsing fails, proceed with original request
+      }
+    }
+    return fetch(input, init);
+  };
+}
+
 function createOpenAICompatibleChatModel(
   config: ModelConfig,
   settings: OpenAICompatibleSettings
@@ -1560,7 +1577,7 @@ function createOpenAICompatibleChatModel(
     apiKey: settings.apiKey || "__no_api_key__",
     baseURL,
     name: settings.providerName,
-    fetch: createOpenAICompatibleFetch(dropAuthorization),
+    fetch: settings.providerName === "zhipuai" ? createZhipuaiFetchWrapper() : createOpenAICompatibleFetch(dropAuthorization),
   });
   return provider.chat(config.model);
 }
@@ -1634,13 +1651,10 @@ export function createModel(
     }
 
     case "zhipuai": {
-      const zhipuaiBaseUrl = config.model === "glm-5-turbo"
-        ? "https://api.z.ai/api/paas/v4/"
-        : "https://api.z.ai/api/coding/paas/v4/";
       return createOpenAICompatibleChatModel(config, {
         providerName: "zhipuai",
         apiKey: config.apiKey || process.env.ZHIPUAI_API_KEY || "",
-        fallbackBaseUrl: zhipuaiBaseUrl,
+        fallbackBaseUrl: "https://api.z.ai/api/coding/paas/v4/",
         defaultPath: "/",
       });
     }
