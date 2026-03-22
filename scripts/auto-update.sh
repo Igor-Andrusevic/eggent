@@ -214,7 +214,11 @@ perform_update() {
 
     # Rebuild Docker
     log "${BLUE}Пересборка Docker контейнера...${NC}"
-    docker compose build --no-cache app >> "$LOG_FILE" 2>&1
+    if ! docker compose build --no-cache app >> "$LOG_FILE" 2>&1; then
+        log "${RED}✗ Container build failed${NC}"
+        send_update_error_notification "Docker build failed. Check logs: $LOG_FILE"
+        return 1
+    fi
     log "${GREEN}✓ Container rebuilt${NC}"
 
     # Restart container

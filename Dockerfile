@@ -60,10 +60,19 @@ RUN apt-get update \
   && "${PYTHON_VENV}/bin/python3" -m pip --version \
   && rm -rf /var/lib/apt/lists/*
 
-# Install bun for MCP servers
-RUN curl -fsSL https://bun.sh/install | bash \
-  && mv /root/.bun/bin/* /usr/local/bin/ \
-  && rm -rf /root/.bun
+# Install bun for MCP servers (explicit version to avoid 404 on latest redirect)
+ENV BUN_VERSION=1.2.5
+RUN arch=$(uname -m) && \
+    case "$arch" in \
+      x86_64) bun_arch="x64" ;; \
+      aarch64) bun_arch="aarch64" ;; \
+      *) echo "Unsupported arch: $arch" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${bun_arch}.zip" -o /tmp/bun.zip \
+    && unzip /tmp/bun.zip -d /tmp \
+    && mv "/tmp/bun-linux-${bun_arch}/bun" /usr/local/bin/bun \
+    && chmod +x /usr/local/bin/bun \
+    && rm -rf /tmp/bun*
 
 RUN echo "node ALL=(root) NOPASSWD: ALL" > /etc/sudoers.d/eggent-node \
   && chmod 440 /etc/sudoers.d/eggent-node
