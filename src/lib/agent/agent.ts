@@ -1045,17 +1045,19 @@ export async function runAgent(options: {
     // Convert stored messages to ModelMessage format (including tool calls/results)
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
-    // Use shorter history for Gemini to avoid function ordering issues
-    // Reduced to 20 because each assistant message with tool calls splits into 2+ messages
+    // Use shorter history for Gemini and Zhipu to avoid function ordering issues
+    // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
     // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
-    const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
+    const needsStrictOrdering = settings.chatModel.provider === "google" || settings.chatModel.provider === "zhipuai";
+    const historyLimit = needsStrictOrdering ? 25 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     
     // Re-validate after trimming - trimming can create orphaned tool results at the start
     // This is crucial: we must validate AFTER History.trim() has run
+    // Both Google and Zhipu have strict message ordering requirements
     let historyMessages = history.getAll();
-    if (settings.chatModel.provider === "google") {
+    if (needsStrictOrdering) {
       historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
     }
     context.history = historyMessages;
@@ -1242,6 +1244,57 @@ export async function runAgent(options: {
       if (onErrorPersistScheduled) return;
       onErrorPersistScheduled = true;
 
+      const is400Error = streamErrorMessage.includes("400") || streamErrorMessage.includes("Bad Request");
+      
+      if (is400Error && context.history.length > 10) {
+        console.warn(`[runAgent] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
+        
+        try {
+          const shortHistory = context.history.slice(-10);
+          const retryMessages: ModelMessage[] = [
+            ...shortHistory,
+            { role: "user", content: options.userMessage },
+          ];
+          
+          const retryResult = await generateText({
+            model,
+            system: systemPrompt,
+            messages: retryMessages,
+            providerOptions,
+            tools,
+            stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
+            temperature: settings.chatModel.temperature ?? 0.7,
+            maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
+          });
+
+          const retryResponseMessages = (
+            retryResult as unknown as { response?: { messages?: ModelMessage[] } }
+          ).response?.messages || [];
+          
+          const retryText = retryResult.text || "";
+          const retryToolText = getLastResponseToolText(retryResponseMessages);
+          const retryFinalText = retryText.trim() || retryToolText.trim() || "Извините, произошла ошибка. Попробуйте отправить сообщение ещё раз.";
+
+          await cleanupMcpIfNeeded();
+          persistedByOnError = true;
+
+          const persistResult = await persistAssistantTurn({
+            responseMessages: retryResponseMessages,
+            fallbackText: retryFinalText,
+          });
+
+          publishUiSyncEvent({
+            topic: "chat",
+            projectId: options.projectId ?? null,
+            chatId: options.chatId,
+            reason: persistResult === "fallback" ? "agent_turn_retry_fallback" : "agent_turn_retry_success",
+          });
+          return;
+        } catch (retryError) {
+          console.error("[runAgent] Retry also failed:", retryError);
+        }
+      }
+
       setTimeout(async () => {
         if (streamFinished || persistedByOnError) return;
         persistedByOnError = true;
@@ -1392,16 +1445,18 @@ export async function runAgentText(options: {
   if (chat) {
     const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
 
-    // Use shorter history for Gemini to avoid function ordering issues
-    // Reduced to 20 because each assistant message with tool calls splits into 2+ messages
+    // Use shorter history for Gemini and Zhipu to avoid function ordering issues
+    // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
     // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
-    const historyLimit = settings.chatModel.provider === "google" ? 20 : 100;
+    const needsStrictOrdering = settings.chatModel.provider === "google" || settings.chatModel.provider === "zhipuai";
+    const historyLimit = needsStrictOrdering ? 25 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     let historyMessages = history.getAll();
     
     // Re-validate after trimming - trimming can create orphaned tool results at the start
-    if (settings.chatModel.provider === "google") {
+    // Both Google and Zhipu have strict message ordering requirements
+    if (needsStrictOrdering) {
       historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
     }
     context.history = historyMessages;
@@ -1505,6 +1560,81 @@ export async function runAgentText(options: {
     });
 
     return finalText;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const is400Error = errorMessage.includes("400") || errorMessage.includes("Bad Request");
+    
+    if (is400Error && context.history.length > 10) {
+      console.warn(`[runAgentText] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
+      
+      const shortHistory = context.history.slice(-10);
+      const retryMessages: ModelMessage[] = [
+        ...shortHistory,
+        { role: "user", content: options.userMessage },
+      ];
+      
+      try {
+        const generated = await generateText({
+          model,
+          system: systemPrompt,
+          messages: retryMessages,
+          providerOptions,
+          tools,
+          stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
+          temperature: settings.chatModel.temperature ?? 0.7,
+          maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
+        });
+
+        const responseMessages = (
+          generated as unknown as { response?: { messages?: ModelMessage[] } }
+        ).response?.messages;
+
+        const text = generated.text ?? "";
+        const fallbackReply =
+          Array.isArray(responseMessages) && responseMessages.length > 0
+            ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
+            : "";
+        const finalText = text.trim() ? text : fallbackReply;
+
+        try {
+          const latest = await getChat(options.chatId);
+          if (latest) {
+            const now = new Date().toISOString();
+            latest.messages.push({
+              id: crypto.randomUUID(),
+              role: "user",
+              content: options.userMessage,
+              createdAt: now,
+            });
+
+            if (Array.isArray(responseMessages) && responseMessages.length > 0) {
+              for (const msg of responseMessages) {
+                latest.messages.push(...convertModelMessageToChatMessages(msg, now));
+              }
+            } else {
+              latest.messages.push({
+                id: crypto.randomUUID(),
+                role: "assistant",
+                content: finalText,
+                createdAt: now,
+              });
+            }
+
+            latest.updatedAt = now;
+            await saveChat(latest);
+          }
+        } catch {
+          // Non-critical for background runs.
+        }
+
+        return finalText;
+      } catch (retryError) {
+        console.error("[runAgentText] Retry also failed:", retryError);
+        throw retryError;
+      }
+    }
+    
+    throw error;
   } finally {
     if (mcpCleanup) {
       try {
