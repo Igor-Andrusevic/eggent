@@ -78,7 +78,6 @@ export function ToolOutput({ toolName, args, result }: ToolOutputProps) {
   const Icon = TOOL_ICONS[toolName] || Terminal;
   const label = TOOL_LABELS[toolName] || toolName;
 
-  // Don't render the response tool visually
   if (toolName === "response") return null;
 
   return (
@@ -113,7 +112,6 @@ export function ToolOutput({ toolName, args, result }: ToolOutputProps) {
 
       {expanded && (
         <div className="border-t px-3 py-2 space-y-2">
-          {/* Tool arguments */}
           {toolName === "code_execution" && args.code ? (
             <CodeBlock
               code={String(args.code)}
@@ -127,7 +125,6 @@ export function ToolOutput({ toolName, args, result }: ToolOutputProps) {
             />
           ) : null}
 
-          {/* Tool result */}
           {result ? (
             <div className="text-sm">
               <p className="text-xs text-muted-foreground mb-1 font-medium">
