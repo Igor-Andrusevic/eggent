@@ -7,7 +7,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, Loader2, Moon, Save, ShieldCheck, Sun } from "lucide-react";
+import { Check, Loader2, Moon, Save, ShieldCheck, Sun, Mail, Calendar } from "lucide-react";
 import { ChatModelWizard, EmbeddingsModelWizard } from "@/components/settings/model-wizards";
 import { updateSettingsByPath } from "@/lib/settings/update-settings-path";
 import type { AppSettings } from "@/lib/types";
@@ -22,6 +22,13 @@ export default function SettingsPage() {
   const [authSaving, setAuthSaving] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSaved, setAuthSaved] = useState(false);
+  const [googleOAuthStatus, setGoogleOAuthStatus] = useState<{
+    connected: boolean;
+    hasCredentials: boolean;
+    email?: string;
+  } | null>(null);
+  const [googleOAuthLoading, setGoogleOAuthLoading] = useState(false);
+  const [googleOAuthError, setGoogleOAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -40,6 +47,60 @@ export default function SettingsPage() {
     if (!settings) return;
     document.documentElement.classList.toggle("dark", settings.general.darkMode);
   }, [settings?.general.darkMode]);
+
+  useEffect(() => {
+    if (!settings?.googleWorkspace?.enabled) return;
+    fetch("/api/google-oauth?action=status")
+      .then((res) => res.json())
+      .then((data) => setGoogleOAuthStatus(data))
+      .catch(() => setGoogleOAuthStatus({ connected: false, hasCredentials: false }));
+  }, [settings?.googleWorkspace?.enabled]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("google_oauth_success") === "true") {
+      window.history.replaceState({}, "", window.location.pathname);
+      fetch("/api/google-oauth?action=status")
+        .then((res) => res.json())
+        .then((data) => setGoogleOAuthStatus(data))
+        .catch(() => {});
+    }
+    const error = params.get("google_oauth_error");
+    if (error) {
+      window.history.replaceState({}, "", window.location.pathname);
+      setGoogleOAuthError(error === "no_code" ? "Authorization failed" : decodeURIComponent(error));
+    }
+  }, []);
+
+  async function handleConnectGoogle() {
+    setGoogleOAuthLoading(true);
+    setGoogleOAuthError(null);
+    try {
+      const res = await fetch("/api/google-oauth?action=url");
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setGoogleOAuthError(data.error || "Failed to get authorization URL");
+      }
+    } catch {
+      setGoogleOAuthError("Failed to connect");
+    } finally {
+      setGoogleOAuthLoading(false);
+    }
+  }
+
+  async function handleDisconnectGoogle() {
+    setGoogleOAuthLoading(true);
+    try {
+      await fetch("/api/google-oauth?action=revoke", { method: "POST" });
+      setGoogleOAuthStatus({ connected: false, hasCredentials: true });
+    } catch {
+      setGoogleOAuthError("Failed to disconnect");
+    } finally {
+      setGoogleOAuthLoading(false);
+    }
+  }
 
   async function handleSave() {
     if (!settings) return;
@@ -424,6 +485,120 @@ export default function SettingsPage() {
                     </div>
                   )}
                 </div>
+              </section>
+
+              <section className="border rounded-xl p-5 bg-card space-y-4">
+                <div className="flex items-center gap-2">
+                  <Mail className="size-5 text-primary" />
+                  <h3 className="font-semibold text-lg">Google Workspace</h3>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Connect Gmail and Google Calendar for AI-powered email and schedule management.
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="google-enabled"
+                    checked={settings.googleWorkspace?.enabled || false}
+                    onChange={(e) => updateSettings("googleWorkspace.enabled", e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="google-enabled">
+                    Enable Google Workspace integration
+                  </Label>
+                </div>
+                {settings.googleWorkspace?.enabled && (
+                  <>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>OAuth Client ID</Label>
+                        <Input
+                          value={settings.googleWorkspace?.clientId || ""}
+                          onChange={(e) => updateSettings("googleWorkspace.clientId", e.target.value)}
+                          placeholder="1080597679739-xxx.apps.googleusercontent.com"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>OAuth Client Secret</Label>
+                        <Input
+                          type="password"
+                          value={settings.googleWorkspace?.clientSecret || ""}
+                          onChange={(e) => updateSettings("googleWorkspace.clientSecret", e.target.value)}
+                          placeholder="GOCSPX-xxx"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="gmail-enabled"
+                          checked={settings.googleWorkspace?.gmailEnabled ?? true}
+                          onChange={(e) => updateSettings("googleWorkspace.gmailEnabled", e.target.checked)}
+                          className="rounded"
+                        />
+                        <Label htmlFor="gmail-enabled" className="flex items-center gap-1">
+                          <Mail className="size-3" /> Gmail
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="calendar-enabled"
+                          checked={settings.googleWorkspace?.calendarEnabled ?? true}
+                          onChange={(e) => updateSettings("googleWorkspace.calendarEnabled", e.target.checked)}
+                          className="rounded"
+                        />
+                        <Label htmlFor="calendar-enabled" className="flex items-center gap-1">
+                          <Calendar className="size-3" /> Calendar
+                        </Label>
+                      </div>
+                    </div>
+                    {settings.googleWorkspace?.clientId && settings.googleWorkspace?.clientSecret && (
+                      <div className="border-t pt-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium">Google Account</p>
+                            <p className="text-xs text-muted-foreground">
+                              {googleOAuthStatus?.connected
+                                ? `Connected as ${googleOAuthStatus.email}`
+                                : "Not connected"}
+                            </p>
+                          </div>
+                          {googleOAuthStatus?.connected ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleDisconnectGoogle}
+                              disabled={googleOAuthLoading}
+                            >
+                              {googleOAuthLoading ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                "Disconnect"
+                              )}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={handleConnectGoogle}
+                              disabled={googleOAuthLoading}
+                            >
+                              {googleOAuthLoading ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                "Connect Google Account"
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                        {googleOAuthError && (
+                          <p className="text-xs text-destructive">{googleOAuthError}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </section>
             </div>
           </SidebarInset>
