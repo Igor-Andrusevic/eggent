@@ -18,7 +18,7 @@ import {
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
 import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
-import { searchWeb } from "@/lib/tools/search-engine";
+import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
 import { createCronTool } from "@/lib/tools/cron-tool";
 import { installPackages } from "@/lib/tools/install-orchestrator";
@@ -1329,11 +1329,11 @@ export async function createAgentTools(
   if (settings.search.enabled && settings.search.provider !== "none") {
     tools.search_web = tool({
       description:
-        "Search the internet for current information. Use this when you need up-to-date information, facts you're unsure about, or any web-based research.",
+        "Search the internet for current information. Use this for broad discovery and multiple sources. For a specific URL, use web_fetch.",
       inputSchema: z.object({
         query: z
           .string()
-          .describe("The search query"),
+          .describe("The search query (not a direct URL)"),
         limit: z
           .number()
           .default(5)
@@ -1341,6 +1341,21 @@ export async function createAgentTools(
       }),
       execute: async ({ query, limit }) => {
         return searchWeb(query, limit, settings.search);
+      },
+    });
+  }
+
+  if (settings.search.enabled) {
+    tools.web_fetch = tool({
+      description:
+        "Fetch and read content from a specific web page URL. Use this when the user gives a direct link.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .describe("Absolute http(s) URL to fetch, for example https://example.com/article"),
+      }),
+      execute: async ({ url }) => {
+        return fetchWebPage(url);
       },
     });
   }

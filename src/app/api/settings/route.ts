@@ -42,6 +42,9 @@ function maskSettingsKeys(settings: AppSettings): AppSettings {
   if (masked.auth.passwordHash) {
     masked.auth.passwordHash = maskKey(masked.auth.passwordHash);
   }
+  if (masked.googleWorkspace?.clientSecret) {
+    masked.googleWorkspace.clientSecret = maskKey(masked.googleWorkspace.clientSecret);
+  }
 
   return masked;
 }
@@ -76,6 +79,13 @@ function restoreMaskedKeys(
     next.auth = {
       ...(next.auth || {}),
       passwordHash: current.auth.passwordHash,
+    };
+  }
+
+  if (isMaskedKey(next.googleWorkspace?.clientSecret)) {
+    next.googleWorkspace = {
+      ...(next.googleWorkspace || {}),
+      clientSecret: current.googleWorkspace?.clientSecret || "",
     };
   }
 

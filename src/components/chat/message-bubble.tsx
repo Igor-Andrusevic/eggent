@@ -205,6 +205,56 @@ function MarkdownContent({ content }: { content: string }) {
             </li>
           );
         },
+        table({ children, ...props }) {
+          return (
+            <div className="my-3 overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[520px] border-collapse text-sm" {...props}>
+                {children}
+              </table>
+            </div>
+          );
+        },
+        thead({ children, ...props }) {
+          return (
+            <thead className="bg-muted/60" {...props}>
+              {children}
+            </thead>
+          );
+        },
+        tbody({ children, ...props }) {
+          return (
+            <tbody className="[&_tr:last-child_td]:border-b-0" {...props}>
+              {children}
+            </tbody>
+          );
+        },
+        tr({ children, ...props }) {
+          return (
+            <tr className="border-b border-border/70" {...props}>
+              {children}
+            </tr>
+          );
+        },
+        th({ children, ...props }) {
+          return (
+            <th
+              className="border-r border-border/70 px-3 py-2 text-left font-semibold text-foreground last:border-r-0"
+              {...props}
+            >
+              {children}
+            </th>
+          );
+        },
+        td({ children, ...props }) {
+          return (
+            <td
+              className="border-r border-border/70 px-3 py-2 align-top text-foreground/90 last:border-r-0"
+              {...props}
+            >
+              {children}
+            </td>
+          );
+        },
       }}
     >
       {content}
