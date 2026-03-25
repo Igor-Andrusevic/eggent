@@ -1,64 +1,66 @@
 ---
 name: docker-monitoring
-description: Мониторинг Docker контейнеров: статус, ресурсы, логи, перезапуски, network, volumes
+description: Мониторинг Docker контейнеров: статус, ресурсы, логи, перезапуски, network, volumes. Выполняй команды docker напрямую (контейнер в группе docker).
 tags: docker, monitoring, containers, resources
 ---
 
 # Docker Monitoring Skill
 
-Ты специализируешься на мониторинге Docker контейнеров на сервере. Проверяешь статус, ресурсы, логи и проблемы.
+Ты специализируешь на мониторинге Docker контейнеров на сервере. Контейнер Eggent имеет прямой доступ к Docker socket.
 
-## 🎯 Принципы работы
+ 
+## Архитектура
 
-1. **Все команды выполняются напрямую**
-   ```bash
-   docker <команда>
-   ```
-
-2. **Контейнеры на этом сервере:**
-   - `eggent-app-1` - Eggent приложение (порт 3000)
-   - `nginx-proxy-manager-app-1` - Reverse proxy (порты 80, 443, 81)
-
-## 📊 Проверки Docker
-
-### 1. Статус контейнеров
-
+**Контейнер запущен от пользователя `node` (UID 1000), который добавлен в группу `docker`.**
+ 
+Все Docker команды работают **напрямую** (без sudo, без `-u smotrini`).
+ 
+## Контейнеры на этом сервере
+| Контейнер | Описание | Порты |
+|---|---|---|
+| `eggent-app-1` | Eggent приложение | 3000 |
+| `nginx-proxy-manager-app-1` | Reverse proxy | 80, 443, 81 |
+ 
+## Проверки Docker
+### Статус контейнеров
 ```bash
 docker ps -a                         # Все контейнеры (включая остановленные)
 docker ps                            # Только запущенные
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"  # Таблица статусов
 ```
-
-### 2. Ресурсы контейнеров
-
+ 
+### Ресурсы контейнеров
 ```bash
-docker stats --no-stream            # Использование CPU, RAM, Network, Disk
+docker stats --no-stream            # CPU, RAM, Network, Disk для всех
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"  # Таблица ресурсов
 ```
-
-### 3. Логи контейнеров
-
+ 
+### Логи контейнеров
 ```bash
-docker logs --tail=50 eggent-app-1  # Eggent логи
-docker logs --tail=50 nginx-proxy-manager-app-1  # NPM логи
-docker logs --tail=100 --since 1h eggent-app-1  # За последний час
+docker logs --tail=50 eggent-app-1                    # Eggent логи
+docker logs --tail=50 nginx-proxy-manager-app-1      # NPM логи
+docker logs --tail=100 --since 1h eggent-app-1       # За последний час
+docker logs --tail=100 --since 24h eggent-app-1     # За последние 24 часа
 ```
-
-### 4. Сеть и volumes
-
-```bash
-docker network ls                    # Список сетей
-docker volume ls                     # Список volumes
-docker inspect eggent-app-1         # Детальная информация
-```
-
-### 5. Docker образы
-
+ 
+### Docker образы и дисковое пространство
 ```bash
 docker images                        # Список образов
 docker system df                     # Использование диска
+docker system df -v                  # Подробная информация
+docker volume ls                     # Список volumes
+docker network ls                    # Список сетей
 ```
-
-## 📋 Формат отчёта Docker
-
+ 
+### Информация о контейнере
+```bash
+docker inspect eggent-app-1          # Детальная информация
+docker inspect eggent-app-1 | jq '.[0].State'     # Статус контейнера
+docker inspect eggent-app-1 | jq '.[0].Mounts'    # Монтирования
+docker inspect eggent-app-1 | jq '.[0].Config.Env' # Переменные окружения
+```
+ 
+## Формат отчёта Docker
 При запросе "docker", "контейнеры" предоставляй:
 
 ```
@@ -68,204 +70,520 @@ docker system df                     # Использование диска
   Запущено: [количество] из [всего]
   Статус: [✅ Все работают / ⚠️ Проблемы]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📦 Eggent App (eggent-app-1):
-  Статус: [✅ running / ❌ exited / ⚠️ restarting]
-  Uptime: [время работы]
-  Image: [название образа]
-  💾 Ресурсы:
-    CPU: [процент]
-    RAM: [использовано / лимит]
-    Network: [↑ upload / ↓ download]
-  📋 Последние логи:
-    [последние 3-5 строк]
-
-📦 Nginx Proxy Manager (nginx-proxy-manager-app-1):
-  Статус: [✅ running / ❌ exited / ⚠️ restarting]
-  Uptime: [время работы]
-  Image: [название образа]
-  💾 Ресурсы:
-    CPU: [процент]
-    RAM: [использовано / лимит]
-    Network: [↑ upload / ↓ download]
-  📋 Последние логи:
-    [последние 3-5 строк]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 Контейнеры:
+[для каждого контейнера:]
+  📦 [Имя] ([image]):
+    Статус: [✅ running / ❌ exited / ⚠️ restarting]
+    Uptime: [время работы]
+    Порты: [список портов]
+    💾 Ресурсы:
+      CPU: [процент]
+      RAM: [использовано / лимит]
+      Network: [↑ TX / ↓ RX]
+    📋 Последние логи:
+      [последние 3-5 строк]
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💽 Docker дисковое пространство:
   Образы: [размер]
   Контейнеры: [размер]
   Build cache: [размер]
+  Local volumes: [размер]
   Всего: [размер]
 
 🌐 Сети:
-  eggent_default: [статус]
-  nginx-proxy-manager_default: [статус]
+  [список сетей]
 
 ⚠️ Проблемы:
-  [если есть проблемы - выделить 🔴]
-  [перезапуски, ошибки, перегруз ресурсов]
+  [список проблем или ✅ Нет issues]
 ```
-
-## 🚨 Критические проблемы
-
+ 
+## Критические проблемы
 **Немедленно сообщай о:**
 - 🔴 Контейнер не запущен (exited)
 - 🔴 Контейнер постоянно перезапускается (restarting)
 - 🔴 CPU > 80% или RAM > 90%
-- 🔴 Ошибки в логах (ERROR, CRITICAL, panic)
+- 🔴 Ошибки в логах (ERROR, CRITICAL, panic, fatal)
 - 🔴 Диск переполнен (>90%)
-
-## 🔍 Анализ проблем
-
-### Контейнер не запускается:
-
+- 🔴 Health check failing
+ 
+## Анализ проблем
+### Контейнер не запускается
 ```bash
-docker logs eggent-app-1 --tail=100  # Последние 100 строк
-docker inspect eggent-app-1          # Детальная информация
+docker logs eggent-app-1 --tail=100    # Последние 100 строк
+docker inspect eggent-app-1 | jq '.[0].State.ExitCode'  # Код выхода
 ```
-
 **Ищем в логах:**
-- Ошибки (ERROR, CRITICAL)
-- Exception
-- Failed to start
-- Cannot connect
-
-### Перезапуски контейнера:
-
+- ERROR, CRITICAL, fatal, panic
+- Exception, Failed to start
+- Cannot connect, connection refused
+- ECONNREFUSED, ENOTFOUND
+ 
+### Перезапуски контейнера
 ```bash
-docker ps -a                         # Проверить статус
+docker ps -a --filter "status=restarting"
+docker inspect eggent-app-1 | jq '.[0].RestartCount'
 ```
-
-### Проблемы с ресурсами:
-
+**Причины перезапусков:**
+- Oшибка в приложении (crash)
+- Нехватка памяти (OOM)
+- Проблема с конфигурацией
+- Health check failure
+- Зависимость недоступна
+ 
+### Проблемы с ресурсами
 ```bash
-docker stats --no-stream            # Проверить нагрузку
-docker system df                    # Проверить диск
+docker stats --no-stream
+docker system df
 ```
-
-### Проблемы с сетью:
-
+**При CPU > 80% или RAM > 90%:**
+- Проверить логи на ошибки
+- Проверить нагрузку конкретных контейнеров
+- Возможно нужна оптимизация или масштабирование
+ 
+### Проблемы с диском
 ```bash
-docker network ls                    # Список сетей
-docker inspect eggent-app-1 | grep -A 10 Network  # Сеть контейнера
+docker system df -v
+df -h /var/lib/docker  # Диск Docker (если доступен)
 ```
-
-## 📝 Quick Commands
-
-```
-"docker" / "контейнеры"              → Полный отчёт по Docker
-"eggent"                            → Статус Eggent контейнера
-"nginx" / "npm"                     → Статус Nginx Proxy Manager
-"logs" / "логи docker"              → Логи контейнеров
-"docker stats"                      → Ресурсы контейнеров
-"docker prune"                      → Информация о чистке (не выполнять!)
-```
-
-## 🔍 Детальная диагностика
-
-### Логи за определенный период:
+**Решение (информация, не выполнять автоматически!):**
 ```bash
-sudo -u smotrini docker logs --since 1h eggent-app-1           # За последний час
-sudo -u smotrini docker logs --since 30m nginx-proxy-manager-app-1  # За 30 минут
-sudo -u smotrini docker logs --tail 500 eggent-app-1 | grep ERROR  # Только ошибки
+docker image prune -a           # Удалить неиспользуемые образы
+docker container prune          # Удалить остановленные контейнеры
+docker volume prune              # Удалить неиспользуемые volumes
+docker builder prune --force    # Очистка build cache
+docker system prune -a            # Полная очистка
 ```
-
-### Информация о контейнере:
+ 
+### Проблемы с сетью
 ```bash
-sudo -u smotrini docker inspect eggent-app-1                 # Вся информация
-sudo -u smotrini docker inspect eggent-app-1 | grep -A 5 Mounts  # Монтируемые volumes
-sudo -u smotrini docker inspect eggent-app-1 | grep -A 10 Ports  # Порты
+docker network ls
+docker inspect eggent-app-1 | jq '.[0].NetworkSettings.Networks'
+docker logs eggent-app-1 | grep -i "network\|connection"
 ```
-
-### Проверка здоровья:
-```bash
-sudo -u smotrini docker inspect eggent-app-1 | grep -i health  # Health check статус
+ 
+## Quick Commands
 ```
-
-## 💡 Типичные проблемы и решения
-
-### 1. Перезапуск контейнера
-**Признаки:** Статус "restarting" или частые смены статуса
-**Проверить:**
+"docker" / "контейнеры"              → Полный отчёт
+"eggent"                         → Статус Eggent
+"nginx" / "npm"                 → Статус Nginx Proxy Manager
+"logs" / "логи docker"              → Логи всех контейнеров
+"docker stats"                  → Ресурсы контейнеров
+"docker images"                  → Список образов
+"docker prune"                  → Информация о чистке (не выполнять!)
+"docker inspect [container]" → Детальная информация
+```
+ 
+## Health Check
 ```bash
-sudo -u smotrini docker logs eggent-app-1 --tail=100
+curl -f http://localhost:3000/api/health || echo "Eggent OK"
+curl -f http://localhost:81 || echo "NPM OK"
+docker inspect eggent-app-1 | jq '.[0].State.Health'
+  # Health status
+```
+ 
+## Auto-restart информация
+```bash
+docker inspect eggent-app-1 | jq '.[0].HostConfig.RestPolicy'
+docker inspect eggent-app-1 | jq '.[0].RestartCount'
+```
+ 
+## Детальная диагностика
+### Логи за период
+```bash
+docker logs --since 1h eggent-app-1           # За последний час
+docker logs --since 24h eggent-app-1         # За последние 24 часа
+docker logs --since 7d eggent-app-1           # За последние 7 дней
+docker logs --tail=500 eggent-app-1 | grep -i error  # Только ошибки
+```
+ 
+### Фильтрация логов
+```bash
+docker logs --tail=500 eggent-app-1 | grep -iE "error|warn|fail|exception"
+docker logs --tail=500 eggent-app-1 | grep -iE "ERROR|WARN|FATAL|CRITICAL"
+```
+ 
+### Мониторинг в реальном времени
+```bash
+docker logs --since 5m --tail=100 eggent-app-1 | grep -iE "request|response"
+docker logs --since 1h --tail=200 eggent-app-1 | grep -iE "error\|slow"
+```
+ 
+### Анализ ресурсов контейнера
+```bash
+docker stats --no-stream --format "json" | jq '.'  # JSON формат
+docker stats --no-stream --format "csv"                   # CSV формат
+```
+ 
+## Типичные проблемы и решения
+### 1. Eggent не отвечает
+**Симптомы:** Health check failing, API errors, timeout
+**Диагностика:**
+```bash
+curl http://localhost:3000/api/health
+docker logs --tail=100 eggent-app-1
+docker inspect eggent-app-1 | jq '.[0].State'
 ```
 **Возможные причины:**
-- Ошибка в приложении
+- Приложение crashed
 - Нехватка памяти
+- Зависимость недоступна
 - Проблема с конфигурацией
-
-### 2. Контейнер не запускается
-**Признаки:** Статус "exited"
-**Проверить:**
+ 
+### 2. Nginx Proxy Manager не работает
+**Симптомы:** 502 errors, proxy не работает
+ SSL issues
+**Диагностика:**
 ```bash
-sudo -u smotrini docker logs eggent-app-1 --tail=100
-sudo -u smotrini docker inspect eggent-app-1 | grep ExitCode
+docker logs --tail=100 nginx-proxy-manager-app-1
+curl http://localhost:81
+curl http://localhost:80
 ```
-
-### 3. Высокая нагрузка CPU/RAM
-**Признаки:** CPU > 80%, RAM > 90%
-**Проверить:**
+ 
+### 3. Контейнер потребляет много памяти
+**Симптомы:** RAM usage высокий, Oшибка O памяти
+ замедление производительности
+**Диагностика:**
 ```bash
-sudo -u smotrini docker stats --no-stream
-sudo -u smotrini docker logs eggent-app-1 --tail=100 | grep -i error
+docker stats --no-stream
+docker logs --tail=100 [container]
 ```
-
-### 4. Проблемы с диском
-**Признаки:** Cannot write, No space left
-**Проверить:**
+**Решения:**
+- Оптимизация кода
+- Ограничение памяти в docker-compose
+- Масштабирование ресурсов
+ 
+### 4. Частые перезапуски
+**Симптомы:** RestartCount растёт, приложение нестабильно
+**диагностика:**
 ```bash
-sudo -u smotrini docker system df
-sudo -u smotrini df -h
+docker inspect [container] | jq '.[0].RestartCount'
+docker logs --tail=100 [container]
 ```
-**Решение:**
-```bash
-# Это только информация! НЕ выполняй автоматически!
-sudo -u smotrini docker image prune -a        # Удалить неиспользуемые образы
-sudo -u smotrini docker builder prune --force # Удалить build cache
-```
-
-## ✅ Best Practices
-
+**Причины:**
+- Crash loop в приложении
+- Health check failure
+- Oшибка конфигурации
+- Нехватка ресурсов
+ 
+## Best Practices
 1. **Структурированный отчёт**
-   - Разделяй информацию по контейнерам
-   - Используй разделители ━━━━
-   - Эмодзи для визуализации 🐳📦💾
-
-2. **Критические проблемы 🔴**
-   - В начало отчёта
-   - Жирный шрифт
+   - Разделяй по контейнерам
+   - Используй разделители
+   - Эмодзи для визуализации
+   
+2. **Критические проблемы в начало**
+   - Выделяй жирным
    - Конкретные рекомендации
-
+    
 3. **Логи разумными порциями**
-   - 3-5 последних строк в основном отчёте
-   - Больше - только по запросу
+   - 3-5 строк в основном отчёте
+   - Больше по запросу
    - Фильтруй ошибки
-
+    
 4. **Контекст важен**
    - Не просто "CPU: 80%"
-   - А "CPU: 80% (высокая нагрузка, возможно нужна оптимизация)"
-
-## 📊 Мониторинг健康状况
-
-**Health Check:**
-```bash
-sudo -u smotrini curl -f http://localhost:3000/api/health || echo "Eggent health check failed"
+   - Добавлять "высокая нагрузка, проверьте логи"
+   - Сравнивайте с историческими данны
+    
+5. **Регулярная проверка**
+   - Мониторинг критических контейнеров
+   - Проверка логов на ошибки
+   - Проверка использование диска
 ```
+---
+name: docker-monitoring
+description: Мониторинг Docker контейнеров: статус, ресурсы, логи, перезапуски, network, volumes. Выполняй команды docker напрямую (контейнер в группе docker).
+tags: docker, monitoring, containers, resources
+---
 
-**Auto-_restart статус:**
+# Docker Monitoring Skill
+
+Ты специализируешь на мониторинге Docker контейнеров на сервере. Контейнер Eggent имеет прямой доступ к Docker socket.
+
+ 
+## Архитектура
+
+**Контейнер запущен от пользователя `node` (UID 1000), который добавлен в группу `docker`.**
+
+Все Docker команды работают **напрямую** (без sudo, без `-u smotrini`).
+
+ 
+## Контейнеры на этом сервере
+| Контейнер | Описание | Порты |
+|--- |---|---|
+| `eggent-app-1` | Eggent приложение | 3000 |
+| `nginx-proxy-manager-app-1` | Reverse proxy | 80, 443, 81 |
+ 
+## Проверки Docker
+### Статус контейнеров
 ```bash
-sudo -u smotrini docker inspect eggent-app-1 | grep RestartCount -A 1
+docker ps -a                         # Все контейнеры (включая остановленные)
+docker ps                            # Только запущенные
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"  # Таблица статусов
 ```
+ 
+### Ресурсы контейнеров
+```bash
+docker stats --no-stream            # CPU, RAM, Network, Disk для всех
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"  # Таблица ресурсов
+```
+ 
+### Логи контейнеров
+```bash
+docker logs --tail=50 eggent-app-1                    # Eggent логи
+docker logs --tail=50 nginx-proxy-manager-app-1      # NPM логи
+docker logs --tail=100 --since 1h eggent-app-1       # За последний час
+docker logs --tail=100 --since 24h eggent-app-1     # За последние 24 часа
+```
+ 
+### Docker образы и дисковое пространство
+```bash
+docker images                        # Список образов
+docker system df                     # Использование диска
+docker system df -v                  # Подробная информация
+docker volume ls                     # Список volumes
+docker network ls                    # Список сетей
+```
+ 
+### Информация о контейнере
+```bash
+docker inspect eggent-app-1          # Детальная информация
+docker inspect eggent-app-1 | jq '.[0].State'     # Статус контейнера (если jq установлен)
+docker inspect eggent-app-1 | jq '.[0].Mounts'    # Монтирования
+docker inspect eggent-app-1 | jq '.[0].Config.Env' # Переменные окружения
+```
+ 
+## Формат отчёта Docker
+При запросе "docker", "контейнеры" предоставляй:
 
-## 🚨 Alert правила
+```
+🐳 DOCKER КОНТЕЙНЕРЫ
 
-Сообщай немедленно если:
-- 🔴 Любой контейнер stopped/exited > 5 минут
-- 🔴 RestartCount > 3 за последний час
-- 🔴 CPU > 90% более 5 минут
-- 🔴 RAM > 95%
-- 🔴 ERROR в логах > 10 раз за минуту
+📊 Общий статус:
+  Запущено: [количество] из [всего]
+  Статус: [✅ Все работают / ⚠️ Проблемы]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 Контейнеры:
+[для каждого контейнера:]
+  📦 [Имя] ([image]):
+    Статус: [✅ running / ❌ exited / ⚠️ restarting]
+    Uptime: [время работы]
+    Порты: [список портов]
+    💾 Ресурсы:
+      CPU: [процент]
+      RAM: [использовано / лимит]
+      Network: [↑ TX / ↓ RX]
+    📋 Последние логи:
+      [последние 3-5 строк]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💽 Docker дисковое пространство:
+  Образы: [размер]
+  Контейнеры: [размер]
+  Build cache: [размер]
+  Local volumes: [размер]
+  Всего: [размер]
+
+🌐 Сети:
+  [список сетей]
+
+⚠️ Проблемы:
+  [список проблем или ✅ No issues]
+```
+ 
+## Критические проблемы
+**Немедленно сообщай о:**
+- 🔴 Контейнер не запущен (exited)
+- 🔴 Контейнер постоянно перезапускается (restarting)
+- 🔴 CPU > 80% или RAM > 90%
+- 🔴 Ошибки в логах (ERROR, CRITICAL, panic, fatal)
+- 🔴 Диск переполнен (>90%)
+- 🔴 Health check failing
+ 
+## Анализ проблем
+### Контейнер не запускается
+```bash
+docker logs eggent-app-1 --tail=100    # Последние 100 строк
+docker inspect eggent-app-1 | jq '.[0].State.ExitCode'  # Код выхода (если jq установлен)
+```
+**Ищем в логах:**
+- ERROR, CRITICAL, fatal, panic
+- Exception, Failed to start
+- Cannot connect, connection refused
+- ECONNREFUSED, ENOTFOUND
+ 
+### Перезапуски контейнера
+```bash
+docker ps -a --filter "status=restarting"
+docker inspect eggent-app-1 | jq '.[0].RestartCount'  # Количество перезапусков
+```
+**Причины перезапусков:**
+- Ошибка в приложении (crash)
+- Нехватка памяти (OOM)
+- Проблема с конфигурацией
+- Health check failure
+- Зависимость недоступна
+ 
+### Проблемы с ресурсами
+```bash
+docker stats --no-stream
+docker system df
+```
+**При CPU > 80% или RAM > 90%:**
+- Проверить логи на ошибки
+- Проверить нагрузку конкретных контейнеров
+- Возможно нужна оптимизация или масштабирование
+ 
+### Проблемы с диском
+```bash
+docker system df -v
+df -h /var/lib/docker  # Диск Docker (если доступен)
+```
+**Решение (информация, не выполнять автоматически!):**
+```bash
+docker image prune -a           # Удалить неиспользуемые образы
+docker container prune          # Удалить остановленные контейнеры
+docker volume prune              # Удалить неиспользуемые volumes
+docker builder prune --force    # Очистка build cache
+docker system prune -a            # Полная очистка
+```
+ 
+### Проблемы с сетью
+```bash
+docker network ls
+docker inspect eggent-app-1 | jq '.[0].NetworkSettings.Networks'
+docker logs eggent-app-1 | grep -i "network\|connection"
+```
+ 
+## Quick Commands
+```
+"docker" / "контейнеры"              → Полный отчёт
+"eggent"                         → Статус Eggent
+"nginx" / "npm"                 → Статус Nginx Proxy Manager
+"logs" / "логи docker"              → Логи всех контейнеров
+"docker stats"                  → Ресурсы контейнеров
+"docker images"                  → Список образов
+"docker prune"                  → Информация о чистке (не выполнять!)
+"docker inspect [container]" → Детальная информация
+```
+ 
+## Health Check
+```bash
+curl -f http://localhost:3000/api/health || echo "Eggent OK"
+curl -f http://localhost:81 || echo "NPM OK"
+docker inspect eggent-app-1 | jq '.[0].State.Health'  # Health status (если jq установлен)
+```
+ 
+## Auto-restart информация
+```bash
+docker inspect eggent-app-1 | jq '.[0].HostConfig.RestPolicy'
+docker inspect eggent-app-1 | jq '.[0].RestartCount'
+```
+ 
+## Детальная диагностика
+### Логи за период
+```bash
+docker logs --since 1h eggent-app-1           # За последний час
+docker logs --since 24h eggent-app-1         # За последние 24 часа
+docker logs --since 7d eggent-app-1           # За последние 7 дней
+docker logs --tail=500 eggent-app-1 | grep -i error  # Только ошибки
+```
+ 
+### Фильтрация логов
+```bash
+docker logs --tail=500 eggent-app-1 | grep -iE "error|warn|fail|exception"
+docker logs --tail=500 eggent-app-1 | grep -iE "ERROR|WARN|FATAL|CRITICAL"
+```
+ 
+### Мониторинг в реальном времени
+```bash
+docker logs --since 5m --tail=100 eggent-app-1 | grep -iE "request|response"
+docker logs --since 1h --tail=200 eggent-app-1 | grep -iE "error\|slow"
+```
+ 
+### Анализ ресурсов контейнера
+```bash
+docker stats --no-stream --format "json" | jq '.'  # JSON формат (если jq установлен)
+docker stats --no-stream --format "csv"                   # CSV формат
+```
+ 
+## Типичные проблемы и решения
+### 1. Eggent не отвечает
+**Симптомы:** Health check failing, API errors, timeout
+**Диагностика:**
+```bash
+curl http://localhost:3000/api/health
+docker logs --tail=100 eggent-app-1
+docker inspect eggent-app-1 | jq '.[0].State'
+```
+**Возможные причины:**
+- Приложение crashed
+- Нехватка памяти
+- Зависимость недоступна
+- Проблема с конфигурацией
+ 
+### 2. Nginx Proxy Manager не работает
+**Симптомы:** 502 errors, proxy не работает, SSL issues
+**диагностика:**
+```bash
+docker logs --tail=100 nginx-proxy-manager-app-1
+curl http://localhost:81
+curl http://localhost:80
+```
+ 
+### 3. Контейнер потребляет много памяти
+**Симптомы:** RAM usage высокий, ошибка O памяти, замедление производительности
+**диагностика:**
+```bash
+docker stats --no-stream
+docker logs --tail=100 [container]
+```
+**Решения:**
+- Оптимизация кода
+- Ограничение памяти в docker-compose
+- Масштабирование ресурсов
+ 
+### 4. Частые перезапуски
+**Симптомы:** RestartCount растёт, приложение нестабильно
+**диагностика:**
+```bash
+docker inspect [container] | jq '.[0].RestartCount'
+docker logs --tail=100 [container]
+```
+**Причины:**
+- Crash loop в приложении
+- Health check failure
+- Ошибка конфигурации
+- Нехватка ресурсов
+ 
+## Best Practices
+1. **Структурированный отчёт**
+   - Разделяй по контейнерам
+   - Используй разделители
+   - Эмодзи для визуализации
+    
+2. **Критические проблемы в начало**
+   - Выделяй жирным
+   - Конкретные рекомендации
+    
+3. **Логи разумными порциями**
+   - 3-5 строк в основном отчёте
+   - Больше по запросу
+   - Фильтруй ошибки
+    
+4. **Контекст важен**
+   - Не просто "CPU: 80%"
+   - Добавлять "высокая нагрузка, проверите логи"
+   - Сравнивайте с историческими данны
+    
+5. **регулярная проверка**
+   - Мониторинг критических контейнеров
+   - Проверка логов на ошибки
+   - Проверка использование диска

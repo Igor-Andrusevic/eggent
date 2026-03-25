@@ -1,195 +1,211 @@
 ---
 name: server-monitoring
-description: Комплексный мониторинг состояния сервера: CPU, RAM, диск, сеть, процессы, Docker контейнеры, логи, атаки безопасности
-tags: monitoring, system, server, security
+description: Комплексный мониторинг состояния сервера: CPU, RAM, диск, сеть, Docker контейнеры, логи, безопасность. Выполняй команды напрямую, Docker имеет доступ к хосту через volume mounts.
+tags: monitoring, system, server, security, docker
 ---
 
 # Server Monitoring Skill
 
-Ты специализируешься на мониторинге сервера Ubuntu 24.04. Контейнер Eggent имеет прямой доступ к хост-системе через монтирование.
+Ты специализируешься на мониторинге сервера Ubuntu 24.04. Контейнер Eggent имеет прямой доступ к хост-системе через volume mounts.
 
-## 🎯 Принципы работы
+## Архитектура доступа
 
-1. **Все команды выполняются напрямую (без sudo)**
-   ```bash
-   <команда>
-   ```
+**Контейнер запущен от пользователя `node` (UID 1000) с sudo NOPASSWD.**
 
-2. **Доступ к хост-системе:**
-   - Логи: `/host/var/log/auth.log`, `/host/var/log/syslog`
-   - Процессы: `/host/proc/*`
-   - Система: `/host/sys/*`
-   - Docker: через docker socket (команды работают напрямую)
+| Ресурс хоста | Путь в контейнере | Доступ |
+|---|---|---|
+| Логи `/var/log/*` | `/host/var/log/*` | **Требует sudo** (0640 syslog:adm) |
+| Процессы `/proc/*` | `/host/proc/*` | Напрямую (read-only mount) |
+| Система `/sys/*` | `/host/sys/*` | Напрямую (read-only mount) |
+| Docker socket | `/var/run/docker.sock` | Напрямую (group docker) |
 
-3. **Безопасность превыше всего**
-   - Только чтение данных
-   - Никаких изменений в системе
-   - Монтирования read-only (кроме docker.sock)
+## Правила sudo
 
-## 📊 Доступные команды мониторинга
+```
+# Команды Docker - БЕЗ sudo
+docker ps
+docker stats --no-stream
 
-### CPU и Memory
-```bash
-cat /host/proc/loadavg                              # Load average
-cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|Swap'  # Memory info
-# Уptime из секунды
-cat /host/proc/uptime | awk '{print int($1/86400)" days "int($1%86400/3600)" hours "int($1%3600/60)" minutes"}'
+# Чтение логов хоста - С sudo
+sudo tail -n 50 /host/var/log/syslog
+sudo grep "Invalid user" /host/var/log/auth.log
 ```
 
-### Диск и Filesystem
+## Команды мониторинга
+
+### CPU и Load Average
+
 ```bash
-df -h /                                               # Использование диска хоста
-df -h /app/data                                      # Размер директории данных
-du -sh /app/data/* | sort -hr | head -10            # Крупные директории Eggent
-docker system df                                     # Docker дисковое пространство
+cat /host/proc/loadavg
+# Формат: 1min 5min 15min current_processes/total_processes last_pid
+
+# Количество ядер CPU
+cat /host/proc/cpuinfo | grep -c ^processor
 ```
 
-### Сеть и соединения
+### Память (RAM + Swap)
+
 ```bash
-# Проверить открытые порты через docker ps
-docker ps --format "{{.Ports}}"                       # Порты контейнеров
-# Статистика сети из /proc
-cat /host/proc/net/tcp | wc -l                       # TCP соединения
-cat /host/proc/net/udp | wc -l                       # UDP соединения
+cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|SwapTotal|SwapFree'
+```
+
+### Uptime
+
+```bash
+cat /host/proc/uptime
+# Формат: uptime_seconds idle_seconds
+
+# Конвертация в читаемый формат:
+awk '{printf "%d days, %d hours, %d minutes", $1/86400, ($1%86400)/3600, ($1%3600)/60}' /host/proc/uptime
+```
+
+### Дисковое пространство
+
+```bash
+df -h /                                    # Корневой раздел хоста
+docker system df                           # Docker образы, контейнеры, volumes
+```
+
+### Сетевые соединения
+
+```bash
+# TCP соединения (количество)
+wc -l < /host/proc/net/tcp
+
+# UDP соединения (количество)
+wc -l < /host/proc/net/udp
+
+# Открытые порты через Docker
+docker ps --format "{{.Ports}}"
 ```
 
 ### Docker контейнеры
+
 ```bash
-docker ps                           # Запущенные контейнеры
-docker stats --no-stream            # Ресурсы контейнеров
+docker ps -a                                          # Все контейнеры
+docker stats --no-stream                             # Ресурсы в реальном времени
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"  # Статус в таблице
 ```
 
-### Логи и ошибки
+### Логи системы
+
 ```bash
-sudo tail -n 50 /host/var/log/syslog     # Системные логи
-sudo grep -i error /host/var/log/syslog | tail -20  # Только ошибки
+# Системные логи (требуют sudo)
+sudo tail -n 100 /host/var/log/syslog
+
+# Только ошибки
+sudo grep -i "error\|critical\|panic" /host/var/log/syslog | tail -50
 ```
 
-## 📋 Формат полного отчёта
+### Логи авторизации (SSH, sudo)
 
-При запросе "статус", "состояние" или "status" предоставляй:
+```bash
+# Требуют sudo!
+sudo tail -n 100 /host/var/log/auth.log
+
+# Неудачные попытки входа
+sudo grep "Failed password\|Invalid user" /host/var/log/auth.log | tail -50
+```
+
+## Формат полного отчёта
+
+При запросе "статус", "состояние", "status" или "отчёт":
 
 ```
 🖥️ СОСТОЯНИЕ СЕРВЕРА
 
-⏰ Время: [текущее время и дата]
-📊 Uptime: [uptime из /host/proc/uptime - дни, часы]
-📍 Location: Hetzner-srv02
+⏰ Время: [текущее время]
+📊 Uptime: [дни, часы, минуты]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💾 CPU & Memory:
-  CPU Load: [1min] [5min] [15min] из /host/proc/loadavg
-  RAM: [использовано / всего] ([процент]) из /host/proc/meminfo
-  Swap: [использовано / всего] ([процент])
-  📈 Docker контейнеры по CPU:
-    1. [контейнер] - [CPU%]
-    2. [контейнер] - [CPU%]
-    3. [контейнер] - [CPU%]
+  CPU Load: [1min] [5min] [15min] (ядер: X)
+  RAM: [использовано] / [всего] ([процент]%)
+  Swap: [использовано] / [всего] ([процент]%)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💽 Дисковое пространство:
-  Root (/): [использовано / всего] ([процент]) из df -h /
-  Docker: [информация из docker system df]
-  📦 Крупные директории:
-    - /app/data: [размер]
-    - docker images: [размер]
+  Root (/): [использовано] / [всего] ([процент]%)
+  Docker:
+    Images: [размер]
+    Containers: [размер]
+    Volumes: [размер]
 
-🌐 Сеть:
-  Открытых портов контейнеров: [количество из docker ps]
-  🔥 Прослушиваемые порты: [список из docker ps]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🐳 Docker контейнеры:
-  Запущено: [количество] из [всего]
-  Статус: [✅ OK / ⚠️ PROBLEMS]
-  📊 Ресурсы: [таблица из docker stats --no-stream]
+  Запущено: X из Y
+  [таблица статуса контейнеров]
 
-📋 Последние ошибки в логах:
-  [если есть ошибки - показать последние 3-5 из /host/var/log/syslog]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-⚠️ Критические проблемы:
-  [если проблемы есть - 🔴 выделить красным]
-  [если всё ок - ✅ Всё работает нормально]
+🌐 Сеть:
+  TCP соединений: X
+  UDP соединений: X
+  Открытые порты: [список из docker ps]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ Проблемы:
+  [если есть - 🔴 выделить критические]
+  [если нет - ✅ Сервер работает нормально]
 ```
 
-## 🚨 Критические пороги
+## Критические пороги
 
 **Немедленно предупреждай о:**
-- 🔴 Disk usage > 90%
-- 🔴 RAM usage > 90%
-- 🔴 Load average > количество ядер CPU
-- 🔴 Docker контейнер не запущен
-- 🔴 Ошибки в логах (ERROR, CRITICAL, panic)
-- 🔴 Сервис недоступен
 
-## 💡 Рекомендации
+| Метрика | Критический порог |
+|---|---|
+| Disk usage | > 90% 🔴 |
+| RAM usage | > 90% 🔴 |
+| Swap usage | > 50% ⚠️ |
+| Load average (1min) | > количество ядер CPU 🔴 |
+| Docker контейнер | exited / restarting 🔴 |
+| Ошибки в логах | ERROR, CRITICAL, panic 🔴 |
 
-При обнаружении проблем предоставляй:
-1. Описание проблемы
-2. Возможные причины
-3. Рекомендуемые действия
-4. Команды для диагностики
+## Quick Commands
 
-## 🔍 Команды для углубленной диагностики
+| Запрос | Действие |
+|---|---|
+| "статус" / "status" / "состояние" | Полный отчёт |
+| "cpu" / "процессор" | CPU и Load |
+| "ram" / "память" | Память и Swap |
+| "disk" / "диск" | Дисковое пространство |
+| "docker" / "контейнеры" | Docker статус |
+| "network" / "сеть" | Сеть и порты |
+| "logs" / "логи" | Последние ошибки |
+| "uptime" | Время работы |
 
-Если пользователь просит подробную информацию:
+## Скрипт быстрого сбора данных
 
-### CPU проблемы
 ```bash
-# Список процессов с хоста (если доступно)
-cat /host/proc/*/status 2>/dev/null | grep -E "Name|State|VmSize" | head -50
-# Load average
-cat /host/proc/loadavg
-# Docker контейнеры по ресурсам
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+# Собрать все метрики одной командой:
+echo "=== CPU ===" && cat /host/proc/loadavg && \
+echo "=== MEMORY ===" && cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|SwapTotal|SwapFree' && \
+echo "=== UPTIME ===" && awk '{printf "%d days, %d hours, %d minutes\n", $1/86400, ($1%86400)/3600, ($1%3600)/60}' /host/proc/uptime && \
+echo "=== DISK ===" && df -h / && \
+echo "=== DOCKER ===" && docker ps --format "table {{.Names}}\t{{.Status}}\t{{.CPUPerc}}\t{{.MemPerc}}" && \
+docker system df
 ```
 
-### Память проблемы
-```bash
-# Детальная информация о памяти
-cat /host/proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable|Cached|SwapTotal|SwapFree'
-# Docker использование памяти
-docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}"
-```
+## Best Practices
 
-### Диск проблемы
-```bash
-# Детальный анализ диска
-du -sh /app/data/* | sort -hr | head -20
-# Docker образы и контейнеры
-docker system df -v
-# Неиспользуемые образы
-docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -v "latest"
-```
+1. **Сначала собери данные, потом анализируй**
+   - Выполни все команды сбора
+   - Сформируй отчёт
+   - Выдели проблемы
 
-## 📝 Quick Commands
+2. **Критические проблемы в начало отчёта**
+   - 🔴 Жирный шрифт
+   - Конкретные рекомендации
 
-```
-"статус" / "status" / "состояние"  → Полный отчёт
-"cpu" / "процессор"               → CPU и Load
-"ram" / "memory" / "память"       → Память и Swap
-"disk" / "диск"                   → Дисковое пространство
-"docker"                          → Docker контейнеры
-"network" / "сеть"                → Сеть и порты
-"logs" / "логи"                   → Последние ошибки
-"top"                             → Топ процессов
-```
-
-## ✅ Best Practices
-
-1. **Сначала проверяй, потом сообщай**
-   - Собери данные
-   - Проанализируй
-   - Предоставь структурированный отчёт
-
-2. **Критические проблемы 🔴**
-   - Выделяй их в начало отчёта
-   - Используй жирный шрифт
-   - Давай конкретные рекомендации
-
-3. **Будь кратким, но информативным**
-   - Не захламляй вывод
+3. **Будь кратким**
    - Самое важное - в начале
    - Детали - по запросу
 
-4. **Используй markdown**
-   - Таблицы для данных
-   - Код блоки для команд
-   - Эмодзи для визуализации
+4. **Используй эмодзи**
+   - 🖥️ 💾 💽 🐳 🌐 ⚠️ ✅ 🔴
+   - Улучшает читаемость в Telegram
