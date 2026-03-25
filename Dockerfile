@@ -60,6 +60,7 @@ RUN apt-get update \
     ripgrep \
     sudo \
     unzip \
+    yt-dlp \
   && python3 -m venv --system-site-packages "${PYTHON_VENV}" \
   && "${PYTHON_VENV}/bin/python3" -m pip --version \
   && rm -rf /var/lib/apt/lists/*
