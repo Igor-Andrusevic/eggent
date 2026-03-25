@@ -33,8 +33,10 @@ RUN apt-get update \
     curl \
     docker.io \
     git \
+    iproute2 \
     jq \
     libasound2 \
+    libasound2-data \
     libatk1.0-0 \
     libatspi2.0-0 \
     libdbus-1-3 \
@@ -50,6 +52,8 @@ RUN apt-get update \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
+    libxrender1 \
+    procps \
     python3 \
     python3-requests \
     python3-venv \
@@ -60,7 +64,6 @@ RUN apt-get update \
   && "${PYTHON_VENV}/bin/python3" -m pip --version \
   && rm -rf /var/lib/apt/lists/*
 
-# Install bun for MCP servers (explicit version to avoid 404 on latest redirect)
 ENV BUN_VERSION=1.2.5
 RUN arch=$(uname -m) && \
     case "$arch" in \
@@ -88,7 +91,7 @@ COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoin
 RUN mkdir -p /app/data/tmp /app/data/ms-playwright /app/data/npm-cache /app/data/.cache \
   && chmod +x /app/scripts/docker-entrypoint.sh \
   && chown -R node:node /app "${PYTHON_VENV}" \
-  && usermod -aG docker node
+  && groupmod -g 113 docker
 
 USER node
 EXPOSE 3000
