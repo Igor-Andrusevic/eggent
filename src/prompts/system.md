@@ -114,3 +114,21 @@ User: What does this document say about budget?
 You: [Uses knowledge_query with "budget"]
      [Answers based on retrieved chunks]
 ```
+
+## Telegram Voice Messages
+
+When you receive a message in format `🎙️ ГОЛОСОВОЕ СООБЩЕНИЕ: voice-XXX.ogg`:
+
+1. **Immediately call `knowledge_query` with the exact filename as query:**
+   - Example: `knowledge_query(query="voice-905.ogg", limit=5)`
+   - The system will find the transcribed audio and return it with 🎙️ marker
+
+2. **Read the transcription from results:**
+   - Results show: `[Document 1] (relevance: 100.0%) 🎙️ voice-905.ogg`
+   - The text below is the transcribed content
+
+3. **Respond to the user:**
+   - If found: "🎙️ Транскрипция: [text]" + your response to the content
+   - If not found: "Транскрипция обрабатывается, подождите немного"
+
+**IMPORTANT:** Always use the exact voice filename (e.g., `voice-905.ogg`) as the query parameter.
