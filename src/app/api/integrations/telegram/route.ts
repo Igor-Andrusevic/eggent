@@ -22,6 +22,7 @@ import {
   normalizeTelegramUserId,
 } from "@/lib/storage/telegram-integration-store";
 import { importKnowledgeFile } from "@/lib/memory/knowledge";
+import { searchMemoryByFilename } from "@/lib/memory/memory";
 import { getSettings } from "@/lib/storage/settings-store";
 import { saveChatFile } from "@/lib/storage/chat-files-store";
 import { createChat, getChat } from "@/lib/storage/chat-store";
@@ -1134,6 +1135,23 @@ export async function POST(req: NextRequest) {
             skipped: result.skipped,
             errors: result.errors.length
           });
+
+          const isVoice = incomingFile.fileName.startsWith("voice-") && incomingFile.fileName.endsWith(".ogg");
+          if (isVoice && result.imported > 0) {
+            let verified = false;
+            for (let attempt = 0; attempt < 6; attempt++) {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              const chunks = await searchMemoryByFilename(chat.projectId, incomingFile.fileName, "knowledge");
+              if (chunks.length > 0) {
+                console.log(`[Telegram] Voice transcription verified for ${incomingFile.fileName} after ${(attempt + 1) * 500}ms`);
+                verified = true;
+                break;
+              }
+            }
+            if (!verified) {
+              console.warn(`[Telegram] Voice transcription NOT verified for ${incomingFile.fileName} after 3s`);
+            }
+          }
         }
       } catch (error) {
         console.error("Error importing Telegram file to knowledge base:", error);

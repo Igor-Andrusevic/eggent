@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { insertMemory, searchMemory, deleteMemoryByMetadata } from "@/lib/memory/memory";
+import { insertMemory, searchMemory, deleteMemoryByMetadata, searchMemoryByFilename } from "@/lib/memory/memory";
 import type { AppSettings } from "@/lib/types";
 import { loadDocument } from "@/lib/memory/loaders";
 import { RecursiveCharacterTextSplitter } from "@/lib/memory/text-splitter";
@@ -223,6 +223,13 @@ export async function importKnowledge(
 
 const VOICE_FILE_PATTERN = /^voice-\d+\.ogg$/i;
 
+const VOICE_FILE_RETRIES = 3;
+const VOICE_FILE_RETRY_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Query the knowledge base
  */
@@ -232,15 +239,95 @@ export async function queryKnowledge(
   knowledgeSubdirs: string[],
   settings: AppSettings
 ): Promise<string> {
-  const allResults: Array<{
-    text: string;
-    score: number;
-    metadata: Record<string, unknown>;
-  }> = [];
-
   console.log(`[Knowledge] Querying subdirs: ${knowledgeSubdirs.join(", ")}, query: "${query}", limit: ${limit}`);
 
-  const isVoiceFileQuery = VOICE_FILE_PATTERN.test(query.trim());
+  const trimmedQuery = query.trim();
+  const isVoiceFileQuery = VOICE_FILE_PATTERN.test(trimmedQuery);
+
+  if (isVoiceFileQuery) {
+    const exactResults = await searchByFilenameWithRetry(
+      trimmedQuery,
+      limit,
+      knowledgeSubdirs,
+      "knowledge"
+    );
+    if (exactResults.length > 0) {
+      return formatResults(exactResults);
+    }
+  }
+
+  const allResults = await semanticSearch(
+    query,
+    limit,
+    knowledgeSubdirs,
+    settings
+  );
+
+  if (allResults.length === 0 && isVoiceFileQuery) {
+    console.log(`[Knowledge] Voice file query returned no semantic results, retrying exact filename search with delay`);
+    const exactResults = await searchByFilenameWithRetry(
+      trimmedQuery,
+      limit,
+      knowledgeSubdirs,
+      "knowledge"
+    );
+    if (exactResults.length > 0) {
+      return formatResults(exactResults);
+    }
+
+    console.log(`[Knowledge] Voice file exact search still empty, falling back to latest documents`);
+    const fallbackResults = await fallbackLatestSearch(limit, knowledgeSubdirs, settings);
+    if (fallbackResults.length > 0) {
+      return formatResults(fallbackResults);
+    }
+  }
+
+  if (allResults.length === 0) {
+    return "No relevant documents found in the knowledge base.";
+  }
+
+  return formatResults(allResults);
+}
+
+async function searchByFilenameWithRetry(
+  filename: string,
+  limit: number,
+  knowledgeSubdirs: string[],
+  areaFilter: string
+): Promise<Array<{ text: string; score: number; metadata: Record<string, unknown> }>> {
+  for (let attempt = 0; attempt < VOICE_FILE_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[Knowledge] Retry #${attempt} for exact filename: ${filename}`);
+      await sleep(VOICE_FILE_RETRY_DELAY_MS);
+    }
+
+    const exactResults: Array<{ text: string; score: number; metadata: Record<string, unknown> }> = [];
+    for (const subdir of knowledgeSubdirs) {
+      try {
+        const results = await searchMemoryByFilename(subdir, filename, areaFilter);
+        console.log(`[Knowledge] Exact filename search in ${subdir}: ${results.length} results`);
+        exactResults.push(...results);
+      } catch (error) {
+        console.log(`[Knowledge] Error in exact filename search ${subdir}: ${error}`);
+      }
+    }
+
+    if (exactResults.length > 0) {
+      console.log(`[Knowledge] Found ${exactResults.length} exact filename matches for ${filename}`);
+      return exactResults.slice(0, limit);
+    }
+  }
+
+  return [];
+}
+
+async function semanticSearch(
+  query: string,
+  limit: number,
+  knowledgeSubdirs: string[],
+  settings: AppSettings
+): Promise<Array<{ text: string; score: number; metadata: Record<string, unknown> }>> {
+  const allResults: Array<{ text: string; score: number; metadata: Record<string, unknown> }> = [];
 
   for (const subdir of knowledgeSubdirs) {
     try {
@@ -256,53 +343,61 @@ export async function queryKnowledge(
       allResults.push(...results);
     } catch (error) {
       console.log(`[Knowledge] Error searching subdir ${subdir}: ${error}`);
-      // Skip subdirs that don't exist
     }
   }
 
-  console.log(`[Knowledge] Total results from all subdirs: ${allResults.length}`);
+  console.log(`[Knowledge] Total semantic results from all subdirs: ${allResults.length}`);
+  return allResults;
+}
 
-  if (allResults.length === 0 && isVoiceFileQuery) {
-    console.log(`[Knowledge] Voice file query returned no results, retrying with empty query for latest documents`);
-    for (const subdir of knowledgeSubdirs) {
-      try {
-        const results = await searchMemory(
-          "",
-          limit,
-          settings.memory.similarityThreshold,
-          subdir,
-          settings,
-          "knowledge"
-        );
-        console.log(`[Knowledge] Fallback: Subdir ${subdir} returned ${results.length} results`);
-        allResults.push(...results);
-      } catch (error) {
-        console.log(`[Knowledge] Fallback error searching subdir ${subdir}: ${error}`);
-      }
+async function fallbackLatestSearch(
+  limit: number,
+  knowledgeSubdirs: string[],
+  settings: AppSettings
+): Promise<Array<{ text: string; score: number; metadata: Record<string, unknown> }>> {
+  const allResults: Array<{ text: string; score: number; metadata: Record<string, unknown> }> = [];
+
+  for (const subdir of knowledgeSubdirs) {
+    try {
+      const results = await searchMemory(
+        "",
+        limit,
+        settings.memory.similarityThreshold,
+        subdir,
+        settings,
+        "knowledge"
+      );
+      console.log(`[Knowledge] Fallback: Subdir ${subdir} returned ${results.length} results`);
+      allResults.push(...results);
+    } catch (error) {
+      console.log(`[Knowledge] Fallback error searching subdir ${subdir}: ${error}`);
     }
-    console.log(`[Knowledge] Fallback total results: ${allResults.length}`);
   }
+  console.log(`[Knowledge] Fallback total results: ${allResults.length}`);
+  return allResults;
+}
 
-  if (allResults.length === 0) {
-    return "No relevant documents found in the knowledge base.";
-  }
-
-  // Sort by score and deduplicate
+function formatResults(
+  allResults: Array<{ text: string; score: number; metadata: Record<string, unknown> }>
+): string {
   allResults.sort((a, b) => b.score - a.score);
 
-  // Simple deduplication based on text content
   const seen = new Set<string>();
   const unique = allResults.filter(r => {
     if (seen.has(r.text)) return false;
     seen.add(r.text);
     return true;
-  }).slice(0, limit);
+  });
 
   const formatted = unique
-    .map(
-      (r, i) =>
-        `[Document ${i + 1}] (relevance: ${(r.score * 100).toFixed(1)}%)\n${r.text}`
-    )
+    .map((r, i) => {
+      const filename = typeof r.metadata?.filename === "string" ? r.metadata.filename : "";
+      const isAudio = r.metadata?.audioTranscribed === true;
+      const header = filename
+        ? `[Document ${i + 1}] (relevance: ${(r.score * 100).toFixed(1)}%)${isAudio ? ` 🎙️ ${filename}` : ` 📄 ${filename}`}`
+        : `[Document ${i + 1}] (relevance: ${(r.score * 100).toFixed(1)}%)`;
+      return `${header}\n${r.text}`;
+    })
     .join("\n\n---\n\n");
 
   const result = `Found ${unique.length} relevant document chunks:\n\n${formatted}`;
