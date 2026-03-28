@@ -1,5 +1,4 @@
 import fs from "fs/promises";
-import { execFileSync } from "child_process";
 import path from "path";
 import type { AppSettings } from "@/lib/types";
 import { transcribeWithGemini as geminiTranscribe } from "./gemini-transcription";
@@ -89,18 +88,6 @@ async function transcribeWithOpenAI(
   audioFilePath: string,
   settings: AppSettings
 ): Promise<string> {
-  const scriptPath = path.join(
-    process.cwd(),
-    "bundled-skills",
-    "openai-whisper-api",
-    "scripts",
-    "transcribe.sh"
-  );
-
-  // Check if script exists
-  await fs.access(scriptPath);
-
-  // Get OpenAI API key
   const apiKey = process.env.OPENAI_API_KEY?.trim() ||
     (settings.chatModel.provider === "openai" ? settings.chatModel.apiKey : null);
 
@@ -108,26 +95,33 @@ async function transcribeWithOpenAI(
     throw new Error("OPENAI_API_KEY not found");
   }
 
-  // Create temporary output file
-  const tmpDir = path.join(process.cwd(), "data", "tmp");
-  await fs.mkdir(tmpDir, { recursive: true });
-  const outputFile = path.join(tmpDir, `transcript-${Date.now()}-openai.txt`);
+  const audioBuffer = await fs.readFile(audioFilePath);
+  const filename = path.basename(audioFilePath);
 
-  // Prepare environment with API key
-  const env = {
-    ...process.env,
-    OPENAI_API_KEY: apiKey,
-  };
+  const formData = new FormData();
+  formData.append("file", new Blob([audioBuffer]), filename);
+  formData.append("model", "whisper-1");
+  formData.append("response_format", "text");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
 
   try {
-    // Execute transcription script
-    execFileSync(scriptPath, [audioFilePath, "--out", outputFile], {
-      env,
-      timeout: 60000, // 60 second timeout
+    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: formData,
+      signal: controller.signal,
     });
 
-    // Read the transcript
-    const transcript = await fs.readFile(outputFile, "utf-8");
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI Whisper API error (${response.status}): ${errorText}`);
+    }
+
+    const transcript = await response.text();
     const trimmed = transcript.trim();
 
     if (!trimmed) {
@@ -136,12 +130,7 @@ async function transcribeWithOpenAI(
 
     return trimmed;
   } finally {
-    // Clean up temp file
-    try {
-      await fs.unlink(outputFile);
-    } catch {
-      // Ignore cleanup errors
-    }
+    clearTimeout(timeout);
   }
 }
 

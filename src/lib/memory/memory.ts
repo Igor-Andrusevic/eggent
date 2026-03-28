@@ -285,3 +285,27 @@ export async function getChunksByFilename(
     index: i + 1,
   }));
 }
+
+/**
+ * Search memory by exact metadata filename match.
+ * Returns all matching chunks with their metadata, no embeddings needed.
+ */
+export async function searchMemoryByFilename(
+  subdir: string,
+  filename: string,
+  areaFilter?: string
+): Promise<{ id: string; text: string; score: number; metadata: Record<string, unknown> }[]> {
+  const db = await loadDB(subdir);
+  return db.documents
+    .filter((d) => {
+      if (d.metadata[FILENAME_META] !== filename) return false;
+      if (areaFilter && d.metadata.area !== areaFilter) return false;
+      return true;
+    })
+    .map((d) => ({
+      id: d.id,
+      text: d.text,
+      score: 1.0,
+      metadata: d.metadata,
+    }));
+}
