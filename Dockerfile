@@ -63,6 +63,7 @@ RUN apt-get update \
     yt-dlp \
   && python3 -m venv --system-site-packages "${PYTHON_VENV}" \
   && "${PYTHON_VENV}/bin/python3" -m pip --version \
+  && "${PYTHON_VENV}/bin/pip" install notebooklm-py \
   && rm -rf /var/lib/apt/lists/*
 
 ENV BUN_VERSION=1.2.5

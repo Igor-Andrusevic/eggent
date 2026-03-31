@@ -25,9 +25,11 @@ fix_auth_file() {
 
 fix_auth_dir "/app/data/.codex"
 fix_auth_dir "/app/data/.gemini"
+fix_auth_dir "/home/node/.notebooklm"
 
 fix_auth_file "/app/data/.codex/auth.json"
 fix_auth_file "/app/data/.gemini/oauth_creds.json"
 fix_auth_file "/app/data/.gemini/settings.json"
+fix_auth_file "/home/node/.notebooklm/storage_state.json"
 
 exec npm run start
