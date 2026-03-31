@@ -145,6 +145,7 @@ export function CronSection({ projectId }: CronSectionProps) {
   const [busy, setBusy] = useState(false);
   const [runsLoading, setRunsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
 
   const selectedJob = useMemo(
     () => (selectedJobId ? jobs.find((job) => job.id === selectedJobId) ?? null : null),
@@ -579,6 +580,41 @@ export function CronSection({ projectId }: CronSectionProps) {
                     {job.description && (
                       <p className="text-sm text-muted-foreground">{job.description}</p>
                     )}
+                    {job.payload.message && (() => {
+                      const MAX_LEN = 150;
+                      const msg = job.payload.message;
+                      const isExpanded = expandedMessages.has(job.id);
+                      const needsTruncation = msg.length > MAX_LEN;
+                      return (
+                        <div className="text-sm text-muted-foreground bg-muted/30 rounded px-2 py-1 mt-1">
+                          <span className="text-xs font-medium text-muted-foreground/70 mr-1">Message:</span>
+                          {isExpanded || !needsTruncation ? (
+                            <span className="whitespace-pre-wrap">{msg}</span>
+                          ) : (
+                            <span>{msg.slice(0, MAX_LEN)}…</span>
+                          )}
+                          {needsTruncation && (
+                            <button
+                              type="button"
+                              className="ml-2 text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                              onClick={() =>
+                                setExpandedMessages((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(job.id)) {
+                                    next.delete(job.id);
+                                  } else {
+                                    next.add(job.id);
+                                  }
+                                  return next;
+                                })
+                              }
+                            >
+                              {isExpanded ? "Show less" : "Show more"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <div className="text-xs text-muted-foreground space-y-1">
                       <p>Schedule: {scheduleSummary(job.schedule)}</p>
                       <p>Next run: {formatDateTime(job.state.nextRunAtMs)}</p>
