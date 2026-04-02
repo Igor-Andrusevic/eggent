@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ensureCronSchedulerStarted } from "@/lib/cron/runtime";
 import { getCronJob, removeCronJob, updateCronJob } from "@/lib/cron/service";
 import type { CronJobPatch, CronSchedule } from "@/lib/cron/types";
+import type { ModelConfig } from "@/lib/types";
 
 function coerceSchedule(value: unknown): CronSchedule | null {
   if (!value || typeof value !== "object") {
@@ -105,6 +106,9 @@ export async function PATCH(
       currentPath: typeof payload.currentPath === "string" ? payload.currentPath : undefined,
       timeoutSeconds:
         typeof payload.timeoutSeconds === "number" ? payload.timeoutSeconds : undefined,
+      model: payload.model && typeof payload.model === "object"
+        ? payload.model as ModelConfig
+        : undefined,
     };
   }
 
