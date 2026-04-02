@@ -6,13 +6,16 @@ import {
   Clock3,
   History,
   Loader2,
+  Pencil,
   Play,
   RefreshCw,
   Trash2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MODEL_PROVIDERS } from "@/lib/providers/model-config";
 
 type CronSchedule =
   | { kind: "at"; at: string }
@@ -33,6 +36,7 @@ type CronJob = {
     message: string;
     telegramChatId?: string;
     timeoutSeconds?: number;
+    model?: { provider: string; model: string };
   };
   state: {
     nextRunAtMs?: number;
@@ -74,6 +78,9 @@ type CronFormState = {
   message: string;
   telegramChatId: string;
   timeoutSeconds: string;
+  useCustomModel: boolean;
+  modelProvider: string;
+  modelId: string;
 };
 
 const DEFAULT_FORM: CronFormState = {
@@ -90,13 +97,32 @@ const DEFAULT_FORM: CronFormState = {
   message: "",
   telegramChatId: "",
   timeoutSeconds: "",
+  useCustomModel: false,
+  modelProvider: "",
+  modelId: "",
 };
+
+function getUserLocale(): string {
+  if (typeof navigator !== "undefined" && navigator.language) {
+    return navigator.language;
+  }
+  return "en";
+}
 
 function formatDateTime(ms?: number | null): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) {
     return "n/a";
   }
-  return new Date(ms).toLocaleString();
+  const locale = getUserLocale();
+  return new Date(ms).toLocaleString(locale, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: locale.startsWith("en"),
+  });
 }
 
 function formatDuration(ms?: number): string {
@@ -106,7 +132,38 @@ function formatDuration(ms?: number): string {
   if (ms < 1_000) {
     return `${ms}ms`;
   }
-  return `${(ms / 1_000).toFixed(1)}s`;
+  const totalSec = Math.floor(ms / 1_000);
+  if (totalSec < 60) {
+    return `${totalSec}s`;
+  }
+  const h = Math.floor(totalSec / 3_600);
+  const m = Math.floor((totalSec % 3_600) / 60);
+  const s = totalSec % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0) parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
+function humanEvery(everyMs: number): string {
+  const MINUTE = 60_000;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  if (everyMs >= DAY && everyMs % DAY === 0) {
+    const days = everyMs / DAY;
+    return days === 1 ? "Every day" : `Every ${days} days`;
+  }
+  if (everyMs >= HOUR && everyMs % HOUR === 0) {
+    const hours = everyMs / HOUR;
+    return hours === 1 ? "Every hour" : `Every ${hours} hours`;
+  }
+  if (everyMs >= MINUTE && everyMs % MINUTE === 0) {
+    const minutes = everyMs / MINUTE;
+    return minutes === 1 ? "Every minute" : `Every ${minutes} minutes`;
+  }
+  const sec = everyMs / 1_000;
+  return sec === 1 ? "Every second" : `Every ${sec}s`;
 }
 
 function scheduleSummary(schedule: CronSchedule): string {
@@ -114,7 +171,7 @@ function scheduleSummary(schedule: CronSchedule): string {
     return `At ${schedule.at}`;
   }
   if (schedule.kind === "every") {
-    return `Every ${schedule.everyMs}ms`;
+    return humanEvery(schedule.everyMs);
   }
   return schedule.tz ? `Cron ${schedule.expr} (${schedule.tz})` : `Cron ${schedule.expr}`;
 }
@@ -135,8 +192,60 @@ interface CronSectionProps {
   projectId: string;
 }
 
+function jobToForm(job: CronJob): CronFormState {
+  const schedule = job.schedule;
+  let scheduleKind: CronFormState["scheduleKind"] = "every";
+  let scheduleAt = "";
+  let everyAmount = "30";
+  let everyUnit: CronFormState["everyUnit"] = "minutes";
+  let cronExpr = "0 9 * * 1-5";
+  let cronTz = "";
+
+  if (schedule.kind === "at") {
+    scheduleKind = "at";
+    scheduleAt = schedule.at.slice(0, 16);
+  } else if (schedule.kind === "every") {
+    scheduleKind = "every";
+    const ms = schedule.everyMs;
+    if (ms % 86_400_000 === 0) {
+      everyAmount = String(ms / 86_400_000);
+      everyUnit = "days";
+    } else if (ms % 3_600_000 === 0) {
+      everyAmount = String(ms / 3_600_000);
+      everyUnit = "hours";
+    } else {
+      everyAmount = String(ms / 60_000);
+      everyUnit = "minutes";
+    }
+  } else {
+    scheduleKind = "cron";
+    cronExpr = schedule.expr;
+    cronTz = schedule.tz ?? "";
+  }
+
+  return {
+    name: job.name,
+    description: job.description ?? "",
+    enabled: job.enabled,
+    deleteAfterRun: job.deleteAfterRun ?? false,
+    scheduleKind,
+    scheduleAt,
+    everyAmount,
+    everyUnit,
+    cronExpr,
+    cronTz,
+    message: job.payload.message,
+    telegramChatId: job.payload.telegramChatId ?? "",
+    timeoutSeconds: job.payload.timeoutSeconds != null ? String(job.payload.timeoutSeconds) : "",
+    useCustomModel: !!(job.payload.model?.provider && job.payload.model?.model),
+    modelProvider: job.payload.model?.provider ?? "",
+    modelId: job.payload.model?.model ?? "",
+  };
+}
+
 export function CronSection({ projectId }: CronSectionProps) {
   const [form, setForm] = useState<CronFormState>(DEFAULT_FORM);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<CronStatus | null>(null);
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [runs, setRuns] = useState<CronRunLogEntry[]>([]);
@@ -255,6 +364,11 @@ export function CronSection({ projectId }: CronSectionProps) {
       const timeoutSeconds =
         Number.isFinite(timeoutValue) && timeoutValue > 0 ? Math.floor(timeoutValue) : undefined;
 
+      const model =
+        form.useCustomModel && form.modelProvider && form.modelId
+          ? { provider: form.modelProvider, model: form.modelId }
+          : undefined;
+
       const res = await fetch(`/api/projects/${projectId}/cron`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -269,6 +383,7 @@ export function CronSection({ projectId }: CronSectionProps) {
             message,
             telegramChatId: form.telegramChatId.trim() || undefined,
             timeoutSeconds,
+            model,
           },
         }),
       });
@@ -283,7 +398,105 @@ export function CronSection({ projectId }: CronSectionProps) {
         message: "",
         telegramChatId: "",
         timeoutSeconds: "",
+        useCustomModel: false,
+        modelProvider: "",
+        modelId: "",
       }));
+      await loadStatusAndJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditing(job: CronJob) {
+    setEditingJobId(job.id);
+    setForm(jobToForm(job));
+  }
+
+  function cancelEditing() {
+    setEditingJobId(null);
+    setForm(DEFAULT_FORM);
+  }
+
+  async function updateJob() {
+    if (!editingJobId) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const name = form.name.trim();
+      if (!name) {
+        throw new Error("Job name is required.");
+      }
+      const message = form.message.trim();
+      if (!message) {
+        throw new Error("Agent message is required.");
+      }
+
+      let schedule: CronSchedule;
+      if (form.scheduleKind === "at") {
+        const atMs = Date.parse(form.scheduleAt);
+        if (!Number.isFinite(atMs)) {
+          throw new Error("Invalid date/time for 'At' schedule.");
+        }
+        schedule = { kind: "at", at: new Date(atMs).toISOString() };
+      } else if (form.scheduleKind === "every") {
+        const amount = Number(form.everyAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error("Interval amount must be a positive number.");
+        }
+        const multiplier =
+          form.everyUnit === "minutes"
+            ? 60_000
+            : form.everyUnit === "hours"
+              ? 3_600_000
+              : 86_400_000;
+        schedule = { kind: "every", everyMs: Math.floor(amount * multiplier) };
+      } else {
+        const expr = form.cronExpr.trim();
+        if (!expr) {
+          throw new Error("Cron expression is required.");
+        }
+        schedule = {
+          kind: "cron",
+          expr,
+          tz: form.cronTz.trim() || undefined,
+        };
+      }
+
+      const timeoutValue = Number(form.timeoutSeconds);
+      const timeoutSeconds =
+        Number.isFinite(timeoutValue) && timeoutValue > 0 ? Math.floor(timeoutValue) : undefined;
+
+      const model =
+        form.useCustomModel && form.modelProvider && form.modelId
+          ? { provider: form.modelProvider, model: form.modelId }
+          : undefined;
+
+      const res = await fetch(`/api/projects/${projectId}/cron/${editingJobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: form.description.trim() || undefined,
+          enabled: form.enabled,
+          deleteAfterRun: form.deleteAfterRun,
+          schedule,
+          payload: {
+            kind: "agentTurn",
+            message,
+            telegramChatId: form.telegramChatId.trim() || undefined,
+            timeoutSeconds,
+            model,
+          },
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+      }
+
+      cancelEditing();
       await loadStatusAndJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -392,7 +605,22 @@ export function CronSection({ projectId }: CronSectionProps) {
         </div>
 
         <div className="border rounded-lg bg-card p-4 space-y-3 lg:col-span-2">
-          <p className="text-sm font-medium">Create Job</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">
+              {editingJobId ? "Edit Job" : "Create Job"}
+            </p>
+            {editingJobId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1 text-muted-foreground"
+                onClick={cancelEditing}
+              >
+                <X className="size-3.5" />
+                Cancel
+              </Button>
+            )}
+          </div>
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
@@ -509,6 +737,72 @@ export function CronSection({ projectId }: CronSectionProps) {
           )}
 
           <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.useCustomModel}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    useCustomModel: e.target.checked,
+                    modelProvider: e.target.checked ? prev.modelProvider : "",
+                    modelId: e.target.checked ? prev.modelId : "",
+                  }))
+                }
+              />
+              <span className="font-medium">Override AI model</span>
+            </label>
+            {form.useCustomModel && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="cron-model-provider">Provider</Label>
+                  <select
+                    id="cron-model-provider"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    value={form.modelProvider}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        modelProvider: e.target.value,
+                        modelId: "",
+                      }))
+                    }
+                  >
+                    <option value="">Select provider...</option>
+                    {Object.entries(MODEL_PROVIDERS).map(([key, cfg]) => (
+                      <option key={key} value={key}>
+                        {cfg.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cron-model-id">Model</Label>
+                  <select
+                    id="cron-model-id"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    value={form.modelId}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, modelId: e.target.value }))
+                    }
+                    disabled={!form.modelProvider}
+                  >
+                    <option value="">
+                      {form.modelProvider ? "Select model..." : "Select provider first"}
+                    </option>
+                    {form.modelProvider &&
+                      MODEL_PROVIDERS[form.modelProvider]?.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="cron-message">Agent Message</Label>
             <textarea
               id="cron-message"
@@ -550,9 +844,13 @@ export function CronSection({ projectId }: CronSectionProps) {
             </label>
           </div>
 
-          <Button onClick={() => void createJob()} disabled={busy} className="gap-2">
+          <Button
+            onClick={() => void (editingJobId ? updateJob() : createJob())}
+            disabled={busy}
+            className="gap-2"
+          >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <CalendarClock className="size-4" />}
-            Create Job
+            {editingJobId ? "Save Changes" : "Create Job"}
           </Button>
         </div>
       </div>
@@ -627,6 +925,16 @@ export function CronSection({ projectId }: CronSectionProps) {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startEditing(job)}
+                      disabled={busy}
+                      className="gap-1"
+                    >
+                      <Pencil className="size-3.5" />
+                      Edit
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
