@@ -1,3 +1,4 @@
+import type { ModelConfig } from "@/lib/types";
 import type { CronJobCreate, CronJobPatch, CronSchedule } from "@/lib/cron/types";
 
 type UnknownRecord = Record<string, unknown>;
@@ -30,6 +31,7 @@ const CRON_JOB_KEYS: ReadonlySet<string> = new Set([
   "currentPath",
   "timeoutSeconds",
   "job",
+  "model",
 ]);
 
 const CRON_PATCH_KEYS: ReadonlySet<string> = new Set([
@@ -48,6 +50,7 @@ const CRON_PATCH_KEYS: ReadonlySet<string> = new Set([
   "currentPath",
   "timeoutSeconds",
   "patch",
+  "model",
 ]);
 
 function asRecord(value: unknown): UnknownRecord | null {
@@ -307,6 +310,28 @@ function normalizePayloadFromRecord(input: UnknownRecord): CronJobCreate["payloa
   }
 
   const timeoutSeconds = readNumber(payload.timeoutSeconds) ?? readNumber(input.timeoutSeconds);
+
+  const modelRaw = toRecord(payload.model) ?? toRecord(input.model);
+  let model: ModelConfig | undefined;
+  if (modelRaw) {
+    const rawProvider = readString(modelRaw.provider) ?? "";
+    const modelName = readString(modelRaw.model) ?? readString(modelRaw.modelName);
+    const validProviders = ["openai", "anthropic", "google", "openrouter", "ollama", "custom", "codex-cli", "gemini-cli", "zhipuai"] as const;
+    const provider = validProviders.find((p) => p === rawProvider.toLowerCase());
+    if (provider && modelName) {
+      const temperature = readNumber(modelRaw.temperature);
+      const maxTokens = readNumber(modelRaw.maxTokens);
+      model = {
+        provider,
+        model: modelName,
+        apiKey: readString(modelRaw.apiKey),
+        baseUrl: readString(modelRaw.baseUrl),
+        temperature: typeof temperature === "number" ? temperature : undefined,
+        maxTokens: typeof maxTokens === "number" ? maxTokens : undefined,
+      };
+    }
+  }
+
   return {
     kind: "agentTurn",
     message,
@@ -321,6 +346,7 @@ function normalizePayloadFromRecord(input: UnknownRecord): CronJobCreate["payloa
       typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds)
         ? Math.max(0, Math.floor(timeoutSeconds))
         : undefined,
+    model,
   };
 }
 
@@ -439,6 +465,7 @@ export function normalizeCronToolPatchInput(
       telegramChatId: payload.telegramChatId,
       currentPath: payload.currentPath,
       timeoutSeconds: payload.timeoutSeconds,
+      model: payload.model,
     };
   }
 

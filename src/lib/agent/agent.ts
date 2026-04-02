@@ -15,7 +15,7 @@ import { createAgentTools } from "@/lib/tools/tool";
 import { getProjectMcpTools } from "@/lib/mcp/client";
 import type { AgentContext } from "@/lib/agent/types";
 import { History } from "@/lib/agent/history";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, ModelConfig } from "@/lib/types";
 import { publishUiSyncEvent } from "@/lib/realtime/event-bus";
 
 const LLM_LOG_BORDER = "═".repeat(60);
@@ -1419,10 +1419,12 @@ export async function runAgentText(options: {
   currentPath?: string;
   agentNumber?: number;
   runtimeData?: Record<string, unknown>;
+  modelOverride?: ModelConfig;
 }): Promise<string> {
   const settings = await getSettings();
-  const providerOptions = resolveModelProviderOptions(settings.chatModel.provider);
-  const model = createModel(settings.chatModel, {
+  const effectiveModel = options.modelOverride ?? settings.chatModel;
+  const providerOptions = resolveModelProviderOptions(effectiveModel.provider);
+  const model = createModel(effectiveModel, {
     projectId: options.projectId,
     currentPath: options.currentPath,
   });
@@ -1443,12 +1445,12 @@ export async function runAgentText(options: {
 
   const chat = await getChat(options.chatId);
   if (chat) {
-    const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
+    const allMessages = convertChatMessagesToModelMessages(chat.messages, effectiveModel.provider);
 
     // Use shorter history for Gemini and Zhipu to avoid function ordering issues
     // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
     // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
-    const needsStrictOrdering = settings.chatModel.provider === "google" || settings.chatModel.provider === "zhipuai";
+    const needsStrictOrdering = effectiveModel.provider === "google" || effectiveModel.provider === "zhipuai";
     const historyLimit = needsStrictOrdering ? 25 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
@@ -1490,12 +1492,12 @@ export async function runAgentText(options: {
   ];
 
   logLLMRequest({
-    model: `${settings.chatModel.provider}/${settings.chatModel.model}`,
+    model: `${effectiveModel.provider}/${effectiveModel.model}`,
     system: systemPrompt,
     messages,
     toolNames,
-    temperature: settings.chatModel.temperature,
-    maxTokens: settings.chatModel.maxTokens,
+    temperature: effectiveModel.temperature,
+    maxTokens: effectiveModel.maxTokens,
     label: "LLM Request (non-stream)",
   });
 
@@ -1507,8 +1509,8 @@ export async function runAgentText(options: {
       providerOptions,
       tools,
       stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
-      temperature: settings.chatModel.temperature ?? 0.7,
-      maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
+      temperature: effectiveModel.temperature ?? 0.7,
+      maxOutputTokens: effectiveModel.maxTokens ?? 4096,
     });
 
     const responseMessages = (
@@ -1581,8 +1583,8 @@ export async function runAgentText(options: {
           providerOptions,
           tools,
           stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
-          temperature: settings.chatModel.temperature ?? 0.7,
-          maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
+          temperature: effectiveModel.temperature ?? 0.7,
+          maxOutputTokens: effectiveModel.maxTokens ?? 4096,
         });
 
         const responseMessages = (

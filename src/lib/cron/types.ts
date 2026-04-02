@@ -1,3 +1,5 @@
+import type { ModelConfig } from "@/lib/types";
+
 export type CronProjectId = string;
 
 export type CronSchedule =
@@ -12,6 +14,7 @@ export type CronPayload = {
   telegramChatId?: string;
   currentPath?: string;
   timeoutSeconds?: number;
+  model?: ModelConfig;
 };
 
 export type CronRunStatus = "ok" | "error" | "skipped";
