@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ensureCronSchedulerStarted } from "@/lib/cron/runtime";
 import { addCronJob, listCronJobs } from "@/lib/cron/service";
 import type { CronJobCreate, CronSchedule } from "@/lib/cron/types";
+import type { ModelConfig } from "@/lib/types";
 
 function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
@@ -92,6 +93,9 @@ export async function POST(
       currentPath: typeof payload.currentPath === "string" ? payload.currentPath : undefined,
       timeoutSeconds:
         typeof payload.timeoutSeconds === "number" ? payload.timeoutSeconds : undefined,
+      model: payload.model && typeof payload.model === "object"
+        ? payload.model as ModelConfig
+        : undefined,
     },
   };
 

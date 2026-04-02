@@ -157,6 +157,7 @@ function normalizePayload(raw: CronJobCreate["payload"]): CronJob["payload"] {
     telegramChatId,
     currentPath,
     timeoutSeconds,
+    model: raw.model,
   };
 }
 
@@ -266,6 +267,7 @@ function applyPatch(job: CronJob, patch: CronJobPatch, nowMs: number): void {
             ? Math.max(0, Math.floor(payloadPatch.timeoutSeconds))
             : undefined
           : job.payload.timeoutSeconds,
+      model: "model" in payloadPatch ? payloadPatch.model : job.payload.model,
     };
   }
   job.updatedAtMs = nowMs;
@@ -627,6 +629,7 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
       userMessage: job.payload.message,
       projectId,
       currentPath: job.payload.currentPath,
+      modelOverride: job.payload.model,
       runtimeData:
         telegramChatId && telegramBotToken
           ? {
