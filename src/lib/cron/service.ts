@@ -600,27 +600,34 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
     if (!telegramChatId || !telegramBotToken) {
       return result;
     }
-    try {
-      await sendTelegramMessage(telegramChatId, formatTelegramCronResult(result));
-      return result;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      const deliveryError = `Telegram delivery failed: ${message}`;
-      if (result.status === "error") {
-        return {
-          ...result,
-          endedAt: Date.now(),
-          error: result.error ? `${result.error} | ${deliveryError}` : deliveryError,
-        };
+    const maxAttempts = 3;
+    const retryDelayMs = 2_000;
+    let lastError: string | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await sendTelegramMessage(telegramChatId, formatTelegramCronResult(result));
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+        }
       }
+    }
+    const deliveryError = `Telegram delivery failed after ${maxAttempts} attempts: ${lastError}`;
+    if (result.status === "error") {
       return {
         ...result,
-        status: "error",
         endedAt: Date.now(),
-        error: deliveryError,
+        error: result.error ? `${result.error} | ${deliveryError}` : deliveryError,
       };
     }
+    return {
+      ...result,
+      status: "error",
+      endedAt: Date.now(),
+      error: deliveryError,
+    };
   };
 
   try {
