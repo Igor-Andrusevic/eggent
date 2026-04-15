@@ -407,10 +407,12 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
     }
   }
 
-  // If no user message found, return empty history or add synthetic user message
   if (firstUserIndex === -1) {
-    console.debug("No user message found in history, returning empty array to avoid Gemini errors");
-    return [];
+    console.info("No user message found in history, prepending synthetic user message to preserve tool results");
+    return [
+      { role: "user" as const, content: "[Контекст из предыдущих сообщений]" },
+      ...messages,
+    ];
   }
 
   // If history doesn't start with user, trim it
@@ -1049,7 +1051,7 @@ export async function runAgent(options: {
     // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
     // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
     const needsStrictOrdering = settings.chatModel.provider === "google" || settings.chatModel.provider === "zhipuai";
-    const historyLimit = needsStrictOrdering ? 25 : 100;
+    const historyLimit = needsStrictOrdering ? 50 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
     

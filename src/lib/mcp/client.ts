@@ -384,9 +384,20 @@ export async function callMcpTool(
         parts.push(JSON.stringify(item));
       }
     }
-    return parts.join("\n") || "(no output)";
+    const output = parts.join("\n") || "(no output)";
+
+    if (name.includes("vision") || name.includes("analyze_image") || name.includes("analyze-image") || name.includes("extract_text")) {
+      console.info(`[MCP vision] Tool "${name}" returned ${output.length} chars`, {
+        preview: output.substring(0, 300),
+      });
+    } else if (output.length > 5000) {
+      console.info(`[MCP] Tool "${name}" returned large result: ${output.length} chars`);
+    }
+
+    return output;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[MCP] Tool "${name}" error:`, msg);
     return `[MCP tool error] ${msg}`;
   }
 }
