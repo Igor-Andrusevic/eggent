@@ -364,13 +364,15 @@ export function ChatModelWizard({
 
             if (nextProvider === "ollama") {
               updateSettings("chatModel.baseUrl", "http://localhost:11434/v1");
-              updateSettings("chatModel.apiKey", "");
-            } else if (nextProvider === "custom") {
-              updateSettings("chatModel.baseUrl", "http://localhost:1234/v1");
-            } else if (nextProvider === "codex-cli" || nextProvider === "gemini-cli") {
-              updateSettings("chatModel.baseUrl", "");
             } else {
               updateSettings("chatModel.baseUrl", "");
+            }
+
+            const nextRequiresApiKey =
+              nextAuthMethod === "api_key" &&
+              (nextProviderConfig?.requiresApiKey ?? true);
+            if (!nextRequiresApiKey) {
+              updateSettings("chatModel.apiKey", "");
             }
 
             setConnectionStatus(null);
