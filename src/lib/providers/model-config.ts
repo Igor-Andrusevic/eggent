@@ -50,7 +50,10 @@ export const MODEL_PROVIDERS: Record<string, ProviderConfig> = {
   },
   google: {
     name: "Google",
-    models: [],
+    models: [
+      { id: "gemma-4-31b-it", name: "Gemma 4 31B IT" },
+      { id: "gemma-4-26b-a4b-it", name: "Gemma 4 26B IT" },
+    ],
     envKey: "GOOGLE_API_KEY",
     requiresApiKey: true,
     authMethods: ["api_key"],
