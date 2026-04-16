@@ -31,7 +31,7 @@ function createSplitterOptions(settings: AppSettings) {
     chunkSize,
     // Keep overlap proportional to chunk size to preserve local context.
     chunkOverlap: Math.max(20, Math.floor(chunkSize * 0.2)),
-    separators: ["\n\n", "\n", " ", ""] as const,
+    separators: ["\n\n", "\n", " ", ""] as string[],
   };
 }
 

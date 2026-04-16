@@ -17,7 +17,7 @@ function findNotionMcpServer(servers: McpServerConfig[]): McpServerConfig | null
   return servers.find(
     (server) =>
       server.id === "notion" ||
-      server.command?.includes("notion-mcp-server")
+      (server.transport === "stdio" && server.command?.includes("notion-mcp-server"))
   ) || null;
 }
 
@@ -42,8 +42,6 @@ async function searchNotion(
       throw new Error("Search tool not found in Notion MCP server");
     }
 
-    // Build the tool name (mcp_notion_search or similar)
-    const toolName = `mcp_${mcpConfig.id}_${searchTool.name}`;
     const args: Record<string, unknown> = { query };
 
     if (filter?.object) {

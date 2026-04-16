@@ -6,6 +6,7 @@ import {
   type ModelMessage,
   type ToolExecutionOptions,
   type ToolSet,
+  type ToolCallPart,
 } from "ai";
 import { createModel } from "@/lib/providers/llm-provider";
 import { buildSystemPrompt } from "@/lib/agent/prompts";
@@ -347,6 +348,9 @@ function applyGlobalToolLoopGuard(tools: ToolSet): ToolSet {
             "Change arguments based on the tool error before retrying."
           );
         }
+        if (!toolDef.execute) {
+          throw new Error(`Tool "${toolName}" has no execute function.`);
+        }
 
         const output = await toolDef.execute(input as never, options as never);
         const recoveryHint = buildAutoRecoveryHint(toolName, output);
@@ -437,7 +441,7 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
         if (hasToolCalls) {
           // Extract tool call IDs
           const toolCallIds = content
-            .filter((part): part is { type: string; toolCallId: string } =>
+            .filter((part): part is ToolCallPart =>
               part && typeof part === "object" && "type" in part && part.type === "tool-call" && "toolCallId" in part
             )
             .map(part => part.toolCallId);
@@ -495,7 +499,7 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
           if (hasToolCalls) {
             // Check if any of the tool calls are pending
             const toolCallIds = content
-              .filter((part): part is { type: string; toolCallId: string } =>
+              .filter((part): part is ToolCallPart =>
                 part && typeof part === "object" && "type" in part && part.type === "tool-call" && "toolCallId" in part
               )
               .map(part => part.toolCallId);
@@ -534,18 +538,17 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
         );
 
       if (currentIsTextOnly && nextHasToolCalls) {
-        // Merge the two messages
         const mergedContent: Array<
           | { type: "text"; text: string }
-          | { type: string; toolCallId?: string; toolName?: string; input?: unknown }
+          | ToolCallPart
         > = [];
 
         mergedContent.push({ type: "text", text: currentContent as string });
 
         if (Array.isArray(nextContent)) {
           for (const part of nextContent) {
-            if (part && typeof part === "object" && "type" in part) {
-              mergedContent.push(part as { type: string; toolCallId?: string; toolName?: string; input?: unknown });
+            if (part && typeof part === "object" && "type" in part && part.type === "tool-call") {
+              mergedContent.push(part as ToolCallPart);
             }
           }
         }
