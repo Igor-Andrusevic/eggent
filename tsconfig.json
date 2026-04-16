@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "lib": [
+      "ES2021.String",
       "ES2020",
       "DOM",
       "DOM.Iterable"
@@ -44,6 +45,10 @@
   ],
   "exclude": [
     "node_modules",
-    "reference"
+    "reference",
+    "bundled-skills",
+    "src/lib/tools/google-auth.ts",
+    "src/lib/tools/google-workspace.ts",
+    "src/app/api/google-oauth"
   ]
 }

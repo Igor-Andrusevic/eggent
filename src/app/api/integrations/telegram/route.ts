@@ -42,11 +42,9 @@ import {
 import {
   getUserPreferences,
   getOrCreateUserPreferences,
-  saveUserPreferences,
   updateUserTimezone,
   updateUserLocale,
   markTimezoneAsked,
-  type UserPreferences,
 } from "@/lib/storage/user-preferences-store";
 import {
   guessTimezoneFromLanguage,
@@ -1084,7 +1082,7 @@ export async function POST(req: NextRequest) {
       const tzGuess = guessTimezoneFromLanguage(userLanguageCode);
       if (tzGuess) {
         await markTimezoneAsked(fromUserId);
-        await sendTimezoneConfirmationMessage(botToken, chatId, tzGuess);
+        await sendTimezoneConfirmationMessage(botToken, Number(chatId), tzGuess);
         // Continue processing the message, don't return
       }
     }

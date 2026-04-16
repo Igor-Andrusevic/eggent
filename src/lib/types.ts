@@ -25,6 +25,14 @@ export interface ModelConfig {
   maxTokens?: number;
 }
 
+export interface GoogleWorkspaceSettings {
+  enabled: boolean;
+  clientId?: string;
+  clientSecret?: string;
+  gmailEnabled?: boolean;
+  calendarEnabled?: boolean;
+}
+
 export interface AppSettings {
   chatModel: ModelConfig;
   utilityModel: ModelConfig;
@@ -37,14 +45,14 @@ export interface AppSettings {
   };
   codeExecution: {
     enabled: boolean;
-    timeout: number; // seconds
-    maxOutputLength: number; // characters
+    timeout: number;
+    maxOutputLength: number;
   };
   memory: {
     enabled: boolean;
-    similarityThreshold: number; // 0-1
+    similarityThreshold: number;
     maxResults: number;
-    chunkSize: number; // characters per chunk for knowledge ingestion
+    chunkSize: number;
   };
   search: {
     enabled: boolean;
@@ -62,6 +70,7 @@ export interface AppSettings {
     passwordHash: string;
     mustChangeCredentials: boolean;
   };
+  googleWorkspace?: GoogleWorkspaceSettings;
 }
 
 // --- Chat ---

@@ -1,6 +1,6 @@
 export interface TimezoneGuess {
   timezone: string;
-  confidence: "high" | "low";
+  confidence: "high" | "medium" | "low";
   displayName: string;
   utcOffset: string;
 }

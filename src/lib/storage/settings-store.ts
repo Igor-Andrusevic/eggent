@@ -58,6 +58,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     passwordHash: DEFAULT_AUTH_PASSWORD_HASH,
     mustChangeCredentials: true,
   },
+  googleWorkspace: {
+    enabled: false,
+    clientId: "",
+    clientSecret: "",
+    gmailEnabled: true,
+    calendarEnabled: true,
+  },
 };
 
 export async function getSettings(): Promise<AppSettings> {
