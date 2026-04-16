@@ -17,17 +17,16 @@ export async function GET(req: NextRequest) {
                 apiKey = settings.chatModel.apiKey || "";
             } else if (type === "embedding" && settings.embeddingsModel.provider === provider) {
                 apiKey = settings.embeddingsModel.apiKey || "";
-            } else if (provider === "openrouter" && process.env.OPENROUTER_API_KEY) {
-                // Special case for environment variables if not in settings explicitly
-                apiKey = process.env.OPENROUTER_API_KEY;
-            } else if (provider === "openai" && process.env.OPENAI_API_KEY) {
-                apiKey = process.env.OPENAI_API_KEY;
-            } else if (provider === "anthropic" && process.env.ANTHROPIC_API_KEY) {
-                apiKey = process.env.ANTHROPIC_API_KEY;
-            } else if (provider === "google" && process.env.GOOGLE_API_KEY) {
-                apiKey = process.env.GOOGLE_API_KEY;
-            } else if (provider === "zhipuai" && process.env.ZHIPUAI_API_KEY) {
-                apiKey = process.env.ZHIPUAI_API_KEY;
+            }
+            if (!apiKey) {
+                const envMap: Record<string, string | undefined> = {
+                    openrouter: process.env.OPENROUTER_API_KEY,
+                    openai: process.env.OPENAI_API_KEY,
+                    anthropic: process.env.ANTHROPIC_API_KEY,
+                    google: process.env.GOOGLE_API_KEY,
+                    zhipuai: process.env.ZHIPUAI_API_KEY,
+                };
+                apiKey = envMap[provider] || "";
             }
         } catch (e) {
             console.error("Failed to load settings for API key lookup", e);

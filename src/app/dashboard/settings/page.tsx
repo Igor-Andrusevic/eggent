@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -15,6 +15,9 @@ import type { AppSettings } from "@/lib/types";
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSettingsRef = useRef<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -35,6 +38,7 @@ export default function SettingsPage() {
       .then((response) => response.json())
       .then((data) => {
         setSettings(data);
+        latestSettingsRef.current = data;
         if (data?.auth?.username && typeof data.auth.username === "string") {
           setAuthUsername(data.auth.username);
         }
@@ -116,9 +120,45 @@ export default function SettingsPage() {
   function updateSettings(path: string, value: unknown) {
     setSettings((prev) => {
       if (!prev) return null;
-      return updateSettingsByPath(prev, path, value);
+      const next = updateSettingsByPath(prev, path, value);
+      latestSettingsRef.current = next;
+      return next;
     });
   }
+
+  const autoSave = useCallback(async (data: AppSettings) => {
+    try {
+      setAutoSaving(true);
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const updated = (await res.json()) as AppSettings;
+        setSettings(updated);
+      }
+    } catch {
+      // silent
+    } finally {
+      setAutoSaving(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = setTimeout(() => {
+      void autoSave(latestSettingsRef.current || settings);
+    }, 1000);
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [settings, autoSave]);
 
   async function handleUpdateAuth() {
     const username = authUsername.trim();
@@ -218,19 +258,33 @@ export default function SettingsPage() {
                     Configure AI models, tools, and preferences.
                   </p>
                 </div>
-                <Button onClick={handleSave} className="gap-2">
-                  {saved ? (
-                    <>
-                      <Check className="size-4" />
-                      Saved
-                    </>
-                  ) : (
-                    <>
-                      <Save className="size-4" />
-                      Save Settings
-                    </>
+                <div className="flex items-center gap-3">
+                  {autoSaving && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="size-3 animate-spin" />
+                      Saving...
+                    </span>
                   )}
-                </Button>
+                  {saved && !autoSaving && (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <Check className="size-3" />
+                      Saved
+                    </span>
+                  )}
+                  <Button onClick={handleSave} className="gap-2">
+                    {saved ? (
+                      <>
+                        <Check className="size-4" />
+                        Saved
+                      </>
+                    ) : (
+                      <>
+                        <Save className="size-4" />
+                        Save Settings
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
 
               <ChatModelWizard settings={settings} updateSettings={updateSettings} />
