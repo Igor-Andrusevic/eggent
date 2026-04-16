@@ -1,4 +1,5 @@
 import type { AppSettings } from "@/lib/types";
+import { validateUrlForFetch } from "@/lib/utils/ssrf-guard";
 
 interface SearchResult {
   title: string;
@@ -15,6 +16,10 @@ const WEB_FETCH_MAX_CHARS = 12000;
 
 export async function fetchWebPage(rawUrl: string): Promise<string> {
   const url = normalizeFetchUrl(rawUrl);
+  const ssrf = validateUrlForFetch(url.toString());
+  if (!ssrf.safe) {
+    return `Web fetch error: ${ssrf.reason}`;
+  }
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), WEB_FETCH_TIMEOUT_MS);
 

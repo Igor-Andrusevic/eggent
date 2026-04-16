@@ -70,15 +70,24 @@ export async function POST(
     await fs.mkdir(knowledgeDir, { recursive: true });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const filePath = path.join(knowledgeDir, file.name);
+    const safeName = path.basename(file.name);
+    if (!safeName) {
+        return NextResponse.json({ error: "Invalid file name" }, { status: 400 });
+    }
+
+    const filePath = path.join(knowledgeDir, safeName);
+    const resolvedPath = path.resolve(filePath);
+    const resolvedDir = path.resolve(knowledgeDir);
+    if (resolvedPath !== resolvedDir && !resolvedPath.startsWith(resolvedDir + path.sep)) {
+        return NextResponse.json({ error: "Invalid file path" }, { status: 403 });
+    }
 
     try {
         // Save file
         await fs.writeFile(filePath, buffer);
 
-        // Ingest only the uploaded file (removes its old chunks first, so no duplicates)
         const settings = await getSettings();
-        const result = await importKnowledgeFile(knowledgeDir, id, settings, file.name);
+        const result = await importKnowledgeFile(knowledgeDir, id, settings, safeName);
 
         if (result.errors.length > 0) {
             console.error("Ingestion errors:", result.errors);
@@ -87,13 +96,13 @@ export async function POST(
                     message: "File saved but ingestion had errors",
                     details: result
                 },
-                { status: 207 } // Multi-Status
+                { status: 207 }
             );
         }
 
         return NextResponse.json({
             message: "File uploaded and ingested successfully",
-            filename: file.name
+            filename: safeName
         });
 
     } catch (error) {
@@ -124,22 +133,30 @@ export async function DELETE(
             return NextResponse.json({ error: "Filename is required" }, { status: 400 });
         }
 
+        const safeName = path.basename(filename);
+        if (!safeName) {
+            return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
+        }
+
         const projectDir = path.join(process.cwd(), "data", "projects", id);
         const knowledgeDir = path.join(projectDir, ".meta", "knowledge");
-        const filePath = path.join(knowledgeDir, filename);
+        const filePath = path.join(knowledgeDir, safeName);
 
-        // Delete file from disk
+        const resolvedPath = path.resolve(filePath);
+        const resolvedDir = path.resolve(knowledgeDir);
+        if (resolvedPath !== resolvedDir && !resolvedPath.startsWith(resolvedDir + path.sep)) {
+            return NextResponse.json({ error: "Invalid file path" }, { status: 403 });
+        }
+
         try {
             await fs.unlink(filePath);
         } catch (error: any) {
             if (error.code !== "ENOENT") {
                 throw error;
             }
-            // If file doesn't exist, we still try to delete vectors
         }
 
-        // Delete vectors
-        const deletedVectors = await deleteMemoryByMetadata("filename", filename, id);
+        const deletedVectors = await deleteMemoryByMetadata("filename", safeName, id);
 
         return NextResponse.json({
             message: "File and vectors deleted successfully",

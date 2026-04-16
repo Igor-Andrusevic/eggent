@@ -76,15 +76,30 @@ export async function POST(req: NextRequest) {
                 // Ensure knowledge directory exists
                 await fs.mkdir(knowledgeDir, { recursive: true });
 
-                // Copy file to knowledge directory
-                const knowledgeFilePath = path.join(knowledgeDir, file.name);
+                const safeFileName = path.basename(file.name);
+                if (!safeFileName) {
+                    return Response.json(
+                        { error: "Invalid file name" },
+                        { status: 400 }
+                    );
+                }
+
+                const knowledgeFilePath = path.join(knowledgeDir, safeFileName);
+                const resolvedKnowledge = path.resolve(knowledgeFilePath);
+                const resolvedDir = path.resolve(knowledgeDir);
+                if (resolvedKnowledge !== resolvedDir && !resolvedKnowledge.startsWith(resolvedDir + path.sep)) {
+                    return Response.json(
+                        { error: "Invalid file path" },
+                        { status: 403 }
+                    );
+                }
+
                 await fs.writeFile(knowledgeFilePath, buffer);
 
-                // Import into vector DB for semantic search
                 const settings = await getSettings();
-                const result = await importKnowledgeFile(knowledgeDir, chat.projectId, settings, file.name);
+                const result = await importKnowledgeFile(knowledgeDir, chat.projectId, settings, safeFileName);
 
-                console.log(`File ${file.name} imported to knowledge base:`, {
+                console.log(`File ${safeFileName} imported to knowledge base:`, {
                     imported: result.imported,
                     skipped: result.skipped,
                     errors: result.errors.length

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getCliProviderModels } from "@/lib/providers/cli-models";
 import { MODEL_PROVIDERS } from "@/lib/providers/model-config";
 import { getSettings } from "@/lib/storage/settings-store";
+import { validateUrlForFetch } from "@/lib/utils/ssrf-guard";
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -84,6 +85,11 @@ export async function GET(req: NextRequest) {
                 const normalizedBaseUrl = rawBaseUrl
                     .replace(/\/+$/, "")
                     .replace(/\/v1$/, "");
+
+                const ssrf = validateUrlForFetch(normalizedBaseUrl);
+                if (!ssrf.safe) {
+                    return Response.json({ error: ssrf.reason }, { status: 400 });
+                }
 
                 const res = await fetch(`${normalizedBaseUrl}/api/tags`);
                 if (!res.ok) throw new Error(`Ollama API error: ${res.status}`);

@@ -97,7 +97,7 @@ export async function deleteChatFile(
     // Security: ensure path is within chat files directory
     const resolvedPath = path.resolve(fullPath);
     const resolvedDir = path.resolve(dir);
-    if (!resolvedPath.startsWith(resolvedDir)) {
+    if (resolvedPath !== resolvedDir && !resolvedPath.startsWith(resolvedDir + path.sep)) {
         return false;
     }
 

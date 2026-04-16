@@ -28,10 +28,15 @@ function parseBooleanEnv(value: string | undefined): boolean | null {
 }
 
 function getSessionSecret(): string {
-  return (
-    process.env.EGGENT_AUTH_SECRET?.trim() ||
-    "eggent-default-auth-secret-change-me"
-  );
+  const secret = process.env.EGGENT_AUTH_SECRET?.trim();
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("CRITICAL SECURITY ERROR: EGGENT_AUTH_SECRET is not set!");
+    }
+    console.warn("WARNING: Using default auth secret. Do not use in production.");
+    return "eggent-default-auth-secret-change-me";
+  }
+  return secret;
 }
 
 function utf8ToBytes(value: string): Uint8Array {

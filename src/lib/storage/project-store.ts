@@ -1450,6 +1450,12 @@ export async function getProjectFiles(
     ? path.join(baseDir, subPath)
     : baseDir;
 
+  const resolvedTarget = path.resolve(targetDir);
+  const resolvedBase = path.resolve(baseDir);
+  if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
+    return [];
+  }
+
   try {
     const entries = await fs.readdir(targetDir, { withFileTypes: true });
     const files = [];

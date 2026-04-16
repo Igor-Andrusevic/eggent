@@ -36,7 +36,7 @@ export async function DELETE(req: NextRequest) {
   // Security: ensure the path stays within the project directory
   const resolvedPath = path.resolve(fullPath);
   const resolvedWorkDir = path.resolve(workDir);
-  if (!resolvedPath.startsWith(resolvedWorkDir)) {
+  if (resolvedPath !== resolvedWorkDir && !resolvedPath.startsWith(resolvedWorkDir + path.sep)) {
     return Response.json(
       { error: "Invalid file path" },
       { status: 403 }
