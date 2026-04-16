@@ -10,8 +10,10 @@ function isPublicApi(req: NextRequest, pathname: string): boolean {
   if (pathname === "/api/auth/login") return true;
   if (pathname === "/api/auth/logout") return true;
   if (pathname === "/api/auth/status") return true;
-  if (pathname === "/api/external/message") return true;
-  if (pathname === "/api/integrations/telegram" && req.method === "POST") {
+  if (pathname.startsWith("/api/external/") && req.headers.get("authorization")) {
+    return true;
+  }
+  if (pathname.startsWith("/api/integrations/telegram") && req.method === "POST") {
     return true;
   }
   return false;
