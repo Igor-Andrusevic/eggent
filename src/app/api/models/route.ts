@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
                         if (type === "embedding") {
                             return m.id.includes("embedding");
                         }
-                        return m.id.includes("gemini");
+                        return m.id.includes("gemini") || m.id.includes("gemma");
                     })
                     .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
                 break;
