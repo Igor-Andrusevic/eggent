@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { safeTokenMatch } from "@/lib/utils/crypto";
 import {
   ExternalMessageError,
   handleExternalMessage,
@@ -26,15 +26,6 @@ function parseBearerToken(req: NextRequest): string | null {
   return token;
 }
 
-function safeTokenMatch(actual: string, expected: string): boolean {
-  const actualBytes = Buffer.from(actual);
-  const expectedBytes = Buffer.from(expected);
-  if (actualBytes.length !== expectedBytes.length) {
-    return false;
-  }
-
-  return timingSafeEqual(actualBytes, expectedBytes);
-}
 
 export async function POST(req: NextRequest) {
   try {

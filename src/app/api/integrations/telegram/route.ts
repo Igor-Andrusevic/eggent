@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { safeTokenMatch } from "@/lib/utils/crypto";
+import { normalizeTelegramUserId } from "@/lib/utils/string";
+import { checkRateLimit } from "@/lib/utils/rate-limit";
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
@@ -19,7 +21,6 @@ import {
 import {
   consumeTelegramAccessCode,
   getTelegramIntegrationRuntimeConfig,
-  normalizeTelegramUserId,
 } from "@/lib/storage/telegram-integration-store";
 import { importKnowledgeFile } from "@/lib/memory/knowledge";
 import { searchMemoryByFilename } from "@/lib/memory/memory";
@@ -250,16 +251,6 @@ async function sendTimezoneSelectionMessage(
   ]);
 
   await sendTelegramMessageWithInlineButtons(botToken, chatId, text, buttons);
-}
-
-function safeTokenMatch(actual: string, expected: string): boolean {
-  const actualBytes = Buffer.from(actual);
-  const expectedBytes = Buffer.from(expected);
-  if (actualBytes.length !== expectedBytes.length) {
-    return false;
-  }
-
-  return timingSafeEqual(actualBytes, expectedBytes);
 }
 
 function getBotId(botToken: string): string {
@@ -820,12 +811,29 @@ export async function POST(req: NextRequest) {
 
     if (!allowedUserIds.has(fromUserId)) {
       const accessCode = extractAccessCodeCandidate(text);
-      const granted =
-        accessCode &&
-        (await consumeTelegramAccessCode({
+      let granted = false;
+
+      if (accessCode) {
+        if (!checkRateLimit(`tg_code_limit_${fromUserId}`, 5, 15 * 60 * 1000)) {
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            "Слишком много попыток ввода кода активации. Пожалуйста, подождите 15 минут.",
+            messageId
+          );
+          return Response.json({
+            ok: true,
+            ignored: true,
+            reason: "rate_limit_exceeded",
+            userId: fromUserId,
+          });
+        }
+
+        granted = await consumeTelegramAccessCode({
           code: accessCode,
           userId: fromUserId,
-        }));
+        });
+      }
 
       if (granted) {
         await sendTelegramMessage(

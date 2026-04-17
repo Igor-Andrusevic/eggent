@@ -4,6 +4,8 @@ import { createHash, randomBytes } from "node:crypto";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const SETTINGS_DIR = path.join(DATA_DIR, "settings");
+import { trimString, normalizeTelegramUserId, normalizeDate } from "@/lib/utils/string";
+import { hashAccessCode } from "@/lib/utils/crypto";
 const TELEGRAM_SETTINGS_FILE = path.join(
   SETTINGS_DIR,
   "telegram-integration.json"
@@ -60,26 +62,6 @@ export interface TelegramGeneratedAccessCode {
 const TELEGRAM_ACCESS_CODE_DEFAULT_TTL_MINUTES = 30;
 const TELEGRAM_ACCESS_CODE_MIN_TTL_MINUTES = 1;
 const TELEGRAM_ACCESS_CODE_MAX_TTL_MINUTES = 24 * 60;
-
-function trimString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-export function normalizeTelegramUserId(value: unknown): string {
-  if (typeof value === "number" && Number.isInteger(value)) {
-    return String(value);
-  }
-  const normalized = trimString(value);
-  return /^-?\d+$/.test(normalized) ? normalized : "";
-}
-
-function normalizeDate(value: unknown): string {
-  const raw = trimString(value);
-  if (!raw) return "";
-  const parsed = Date.parse(raw);
-  if (!Number.isFinite(parsed)) return "";
-  return new Date(parsed).toISOString();
-}
 
 function normalizeAllowedUserIds(raw: unknown): string[] {
   const inputValues = Array.isArray(raw) ? raw : [];
@@ -157,10 +139,6 @@ function parseAllowedUserIdsInput(raw: unknown): string[] | undefined {
     return normalizeAllowedUserIds(raw.split(/[\s,]+/g).filter(Boolean));
   }
   throw new Error("allowedUserIds must be an array or string");
-}
-
-function hashAccessCode(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function normalizeAccessCodeInput(value: string): string {
