@@ -24,6 +24,7 @@ import {
 } from "@/lib/storage/telegram-integration-store";
 import { importKnowledgeFile } from "@/lib/memory/knowledge";
 import { searchMemoryByFilename } from "@/lib/memory/memory";
+import { processWikiIngest } from "@/lib/wiki/background-ingest";
 import { getSettings } from "@/lib/storage/settings-store";
 import { saveChatFile } from "@/lib/storage/chat-files-store";
 import { createChat, getChat } from "@/lib/storage/chat-store";
@@ -1140,6 +1141,10 @@ export async function POST(req: NextRequest) {
             imported: result.imported,
             skipped: result.skipped,
             errors: result.errors.length
+          });
+
+          processWikiIngest(chat.projectId, incomingFile.fileName, knowledgeDir).catch((err) => {
+            console.error("[Wiki] Background ingest failed for Telegram file:", err);
           });
 
           const isVoice = incomingFile.fileName.startsWith("voice-") && incomingFile.fileName.endsWith(".ogg");

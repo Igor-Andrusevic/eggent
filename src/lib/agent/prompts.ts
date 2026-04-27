@@ -7,6 +7,7 @@ import {
   getWorkDir,
 } from "@/lib/storage/project-store";
 import { getChatFiles } from "@/lib/storage/chat-files-store";
+import { readIndex } from "@/lib/wiki/wiki-store";
 
 const PROMPTS_DIR = path.join(process.cwd(), "src", "prompts");
 
@@ -149,6 +150,34 @@ export async function buildSystemPrompt(options: {
           `\n</available_skills>`
         );
       }
+    }
+  }
+
+  // 4c. Wiki Index (if project has wiki pages)
+  if (options.projectId) {
+    try {
+      const wikiEntries = await readIndex(options.projectId);
+      if (wikiEntries.length > 0) {
+        const categories = new Map<string, typeof wikiEntries>();
+        for (const entry of wikiEntries) {
+          const list = categories.get(entry.category) ?? [];
+          list.push(entry);
+          categories.set(entry.category, list);
+        }
+        const wikiIndexParts: string[] = [`The project wiki has ${wikiEntries.length} pages. Use wiki_query to search, wiki_read_page to read full pages.`];
+        for (const [cat, entries] of categories) {
+          wikiIndexParts.push(`\n**${cat}/** (${entries.length}):`);
+          for (const e of entries.slice(0, 20)) {
+            wikiIndexParts.push(`  - ${e.name}: ${e.summary}`);
+          }
+          if (entries.length > 20) {
+            wikiIndexParts.push(`  - ...and ${entries.length - 20} more`);
+          }
+        }
+        parts.push(`\n## Wiki Index\n${wikiIndexParts.join("\n")}`);
+      }
+    } catch {
+      // Wiki not available for this project
     }
   }
 

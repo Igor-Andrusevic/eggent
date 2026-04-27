@@ -158,14 +158,10 @@ function useModels(
       if (payload.models?.length) {
         setModels(payload.models);
       } else {
-        const dynamicProviders = [
-          "openai",
-          "openrouter",
-          "ollama",
-          "anthropic",
-          "google",
-        ];
-        if (!dynamicProviders.includes(provider) && providerConfig?.models?.length) {
+        const staticProviders = ["codex-cli", "gemini-cli", "zhipuai"];
+        if (staticProviders.includes(provider) && providerConfig?.models?.length) {
+          setModels([...providerConfig.models]);
+        } else if (providerConfig?.models?.length) {
           setModels([...providerConfig.models]);
         } else {
           setModels([]);
@@ -175,14 +171,7 @@ function useModels(
       setError(cause instanceof Error ? cause.message : "Failed to load models");
 
       const providerConfig = MODEL_PROVIDERS[provider];
-      const dynamicProviders = [
-        "openai",
-        "openrouter",
-        "ollama",
-        "anthropic",
-        "google",
-      ];
-      if (!dynamicProviders.includes(provider) && providerConfig?.models?.length) {
+      if (providerConfig?.models?.length) {
         setModels([...providerConfig.models]);
       } else {
         setModels([]);
