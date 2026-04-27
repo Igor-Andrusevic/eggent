@@ -8,6 +8,7 @@ import {
 } from "@/lib/storage/chat-files-store";
 import { getChat } from "@/lib/storage/chat-store";
 import { importKnowledgeFile } from "@/lib/memory/knowledge";
+import { processWikiIngest } from "@/lib/wiki/background-ingest";
 import { getSettings } from "@/lib/storage/settings-store";
 
 /**
@@ -103,6 +104,10 @@ export async function POST(req: NextRequest) {
                     imported: result.imported,
                     skipped: result.skipped,
                     errors: result.errors.length
+                });
+
+                processWikiIngest(chat.projectId, safeFileName, knowledgeDir).catch((err) => {
+                    console.error("[Wiki] Background ingest failed:", err);
                 });
 
                 // Return file with knowledge import status

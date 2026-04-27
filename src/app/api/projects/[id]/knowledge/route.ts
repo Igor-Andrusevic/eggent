@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
 import { importKnowledgeFile } from "@/lib/memory/knowledge";
+import { processWikiIngest } from "@/lib/wiki/background-ingest";
 import { deleteMemoryByMetadata, getChunkCountsByFilename } from "@/lib/memory/memory";
 import { getProject } from "@/lib/storage/project-store";
 import { getSettings } from "@/lib/storage/settings-store";
@@ -88,6 +89,10 @@ export async function POST(
 
         const settings = await getSettings();
         const result = await importKnowledgeFile(knowledgeDir, id, settings, safeName);
+
+        processWikiIngest(id, safeName, knowledgeDir).catch((err) => {
+            console.error("[Wiki] Background ingest failed:", err);
+        });
 
         if (result.errors.length > 0) {
             console.error("Ingestion errors:", result.errors);

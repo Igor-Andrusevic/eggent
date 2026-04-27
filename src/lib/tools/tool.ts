@@ -18,6 +18,7 @@ import {
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
 import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
+import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint } from "@/lib/wiki/wiki-engine";
 import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
 import { createCronTool } from "@/lib/tools/cron-tool";
@@ -1324,6 +1325,85 @@ export async function createAgentTools(
       return knowledgeQuery(query, limit, context.knowledgeSubdirs, settings);
     },
   });
+
+  // Wiki tools (only for project-scoped contexts)
+  if (context.projectId) {
+    const wikiProjectId = context.projectId;
+
+    tools.wiki_query = tool({
+      description:
+        "Search the project wiki for compiled knowledge. The wiki contains summaries, entity pages, and concept pages extracted from uploaded documents. Use this BEFORE knowledge_query for conceptual questions.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .describe("Search query to find relevant wiki pages"),
+        limit: z
+          .number()
+          .default(5)
+          .describe("Maximum number of wiki pages to return"),
+      }),
+      execute: async ({ query, limit }) => {
+        return wikiQuery(wikiProjectId, query, limit);
+      },
+    });
+
+    tools.wiki_read_page = tool({
+      description:
+        "Read a specific wiki page by its path (e.g. 'sources/my-document' or 'entities/john-smith').",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .describe("Wiki page path in format: category/name (e.g. 'sources/my-document')"),
+      }),
+      execute: async ({ path: pagePath }) => {
+        return wikiReadPage(wikiProjectId, pagePath);
+      },
+    });
+
+    tools.wiki_create_page = tool({
+      description:
+        "Create or update a wiki page manually. Use this to save analysis results, comparisons, or insights back into the wiki.",
+      inputSchema: z.object({
+        category: z
+          .enum(["sources", "entities", "concepts", "synthesis"])
+          .describe("Page category: 'sources' for document summaries, 'entities' for people/orgs, 'concepts' for topics, 'synthesis' for cross-analysis"),
+        name: z
+          .string()
+          .describe("Page name in kebab-case (e.g. 'machine-learning-basics')"),
+        content: z
+          .string()
+          .describe("Markdown content for the wiki page"),
+      }),
+      execute: async ({ category, name, content }) => {
+        return wikiCreatePage(wikiProjectId, category, name, content);
+      },
+    });
+
+    tools.wiki_ingest = tool({
+      description:
+        "Manually trigger wiki ingest for a specific file from the project's knowledge base. The LLM will read the file, extract entities/concepts, and create/update wiki pages.",
+      inputSchema: z.object({
+        filename: z
+          .string()
+          .describe("Name of the file in the knowledge base to ingest (e.g. 'report.pdf')"),
+      }),
+      execute: async ({ filename }) => {
+        const knowledgeDir = path.join(
+          process.cwd(), "data", "projects", wikiProjectId, ".meta", "knowledge"
+        );
+        return wikiIngestFile(wikiProjectId, filename, knowledgeDir, settings);
+      },
+    });
+
+    tools.wiki_lint = tool({
+      description:
+        "Check the project wiki for issues: orphan pages, stale references, missing cross-references, empty pages. Returns a health report.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        return wikiLint(wikiProjectId);
+      },
+    });
+  }
 
   // Search engine tool
   if (settings.search.enabled && settings.search.provider !== "none") {
