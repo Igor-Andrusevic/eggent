@@ -1,5 +1,8 @@
 import { readIndex, readPage, readPageByPath } from "@/lib/wiki/wiki-store";
+import { searchWikiEmbeddings } from "@/lib/wiki/wiki-embeddings";
+import { getSettings } from "@/lib/storage/settings-store";
 import type { WikiPage, WikiIndexEntry } from "@/lib/wiki/types";
+import type { AppSettings } from "@/lib/types";
 
 export interface WikiQueryResult {
   page: WikiPage;
@@ -10,27 +13,80 @@ export interface WikiQueryResult {
 export async function queryWiki(
   projectId: string,
   query: string,
-  limit: number = 5
+  limit: number = 5,
+  settings?: AppSettings
 ): Promise<{ results: WikiQueryResult[]; error?: string }> {
   const indexEntries = await readIndex(projectId);
   if (indexEntries.length === 0) {
     return { results: [], error: "Wiki is empty. No pages have been created yet." };
   }
 
+  const resolvedSettings = settings ?? await getSettingsSafe();
+
   const queryLower = query.toLowerCase();
   const queryWords = queryLower.split(/\s+/).filter(Boolean);
 
-  const scored: WikiQueryResult[] = [];
+  const pathToEntry = new Map<string, WikiIndexEntry>();
+  for (const entry of indexEntries) {
+    pathToEntry.set(entry.relativePath, entry);
+  }
 
+  const keywordScores = new Map<string, number>();
   for (const entry of indexEntries) {
     const score = scoreEntry(entry, queryLower, queryWords);
     if (score > 0) {
-      const page = await readPageByPath(projectId, entry.relativePath);
-      if (page) {
-        const contentScore = scoreContent(page.content, queryLower, queryWords);
-        const finalScore = score * 0.4 + contentScore * 0.6;
-        scored.push({ page, indexEntry: entry, relevanceScore: finalScore });
+      keywordScores.set(entry.relativePath, score);
+    }
+  }
+
+  const embeddingScores = new Map<string, number>();
+  if (resolvedSettings) {
+    try {
+      const embResults = await searchWikiEmbeddings(projectId, query, indexEntries.length, resolvedSettings);
+      for (const r of embResults) {
+        if (r.score > 0) {
+          const normalizedPath = r.path.endsWith(".md") ? r.path : `${r.path}.md`;
+          embeddingScores.set(normalizedPath, r.score);
+        }
       }
+    } catch {
+      // fallback to keyword-only
+    }
+  }
+
+  const hasEmbeddings = embeddingScores.size > 0;
+  const candidatePaths = new Set([...keywordScores.keys(), ...embeddingScores.keys()]);
+
+  const scored: WikiQueryResult[] = [];
+
+  for (const pagePath of candidatePaths) {
+    const entry = pathToEntry.get(pagePath);
+    if (!entry) {
+      const altPath = pagePath.replace(/\.md$/, "");
+      const altEntry = indexEntries.find((e) => e.relativePath === altPath || e.relativePath === pagePath);
+      if (!altEntry) continue;
+    }
+
+    const resolvedEntry = pathToEntry.get(pagePath) ?? indexEntries.find((e) => e.relativePath === pagePath || e.relativePath === pagePath.replace(/\.md$/, ""))!;
+    if (!resolvedEntry) continue;
+
+    const page = await readPageByPath(projectId, resolvedEntry.relativePath);
+    if (!page) continue;
+
+    const kwScore = keywordScores.get(pagePath) ?? 0;
+    const contentScore = scoreContent(page.content, queryLower, queryWords);
+
+    let finalScore: number;
+    if (hasEmbeddings) {
+      const embScore = embeddingScores.get(pagePath) ?? embeddingScores.get(pagePath.replace(/\.md$/, "")) ?? 0;
+      const keywordCombined = kwScore * 0.3 + contentScore * 0.3;
+      finalScore = keywordCombined + embScore * 0.4;
+    } else {
+      finalScore = kwScore * 0.4 + contentScore * 0.6;
+    }
+
+    if (finalScore > 0) {
+      scored.push({ page, indexEntry: resolvedEntry, relevanceScore: finalScore });
     }
   }
 
@@ -94,6 +150,14 @@ export function formatWikiResults(
       return `${header}\n${meta}\n\n${r.page.content}`;
     })
     .join("\n\n---\n\n");
+}
+
+async function getSettingsSafe(): Promise<AppSettings | null> {
+  try {
+    return await getSettings();
+  } catch {
+    return null;
+  }
 }
 
 function scoreEntry(

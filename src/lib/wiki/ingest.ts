@@ -6,9 +6,10 @@ import {
   ensureWikiStructure,
   writePage,
   readIndex,
+  readPage,
   appendLog,
 } from "@/lib/wiki/wiki-store";
-import type { WikiIngestResult } from "@/lib/wiki/types";
+import type { WikiIngestResult, WikiPageCategory } from "@/lib/wiki/types";
 import type { AppSettings } from "@/lib/types";
 
 const INGEST_PROMPT = `You are a wiki maintainer. Your job is to read a source document and produce structured wiki content.
@@ -40,6 +41,35 @@ Respond in this exact JSON format:
 If the document is too short or trivial to extract meaningful entities/concepts, return empty arrays.
 Keep entity and concept names concise and kebab-case.`;
 
+const MERGE_PROMPT = `You are a wiki editor merging new information into an existing wiki page.
+
+Rules:
+- Preserve ALL existing information — never delete or lose existing content
+- Integrate the new information naturally into the existing structure
+- If new info contradicts existing info, keep both with a note like "Note: [source] states..."
+- Add the new source to the Sources section if not already listed
+- Update the "Last updated" date to today
+- Keep the same markdown heading structure
+- Do NOT invent information not present in either version
+- Return ONLY the merged markdown content, no explanation
+
+EXISTING PAGE:
+---
+{existingContent}
+---
+
+NEW INFORMATION from source "{sourceFile}":
+---
+{newExtract}
+---
+
+Produce the merged page content:`;
+
+const MAX_CHUNK_CHARS = 14000;
+const MAX_CHUNKS = 5;
+const CHUNK_OVERLAP = 2000;
+const MAX_MERGE_CONTENT = 8000;
+
 export async function ingestSource(
   projectId: string,
   filePath: string,
@@ -68,15 +98,20 @@ export async function ingestSource(
     return result;
   }
 
-  const truncatedText = sourceText.length > 15000
-    ? sourceText.slice(0, 15000) + "\n\n[... document truncated ...]"
-    : sourceText;
+  const chunks = chunkText(sourceText, MAX_CHUNK_CHARS, CHUNK_OVERLAP, MAX_CHUNKS);
 
-  let parsed: IngestResponse;
-  try {
-    parsed = await callLlmForIngest(truncatedText, settings);
-  } catch (error) {
-    result.errors.push(`LLM ingest failed for ${filename}: ${error instanceof Error ? error.message : String(error)}`);
+  const allParsed: IngestResponse[] = [];
+  for (const chunk of chunks) {
+    try {
+      const parsed = await callLlmForIngest(chunk, settings);
+      allParsed.push(parsed);
+    } catch (error) {
+      result.errors.push(`LLM ingest failed for ${filename} (chunk): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (allParsed.length === 0) {
+    result.errors.push(`All ingest attempts failed for ${filename}`);
     await appendLog(projectId, {
       timestamp: new Date().toISOString(),
       operation: "ingest",
@@ -86,47 +121,69 @@ export async function ingestSource(
     return result;
   }
 
+  const merged = mergeChunkResults(allParsed);
+
   const stem = filename.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
 
   try {
-    const summaryContent = buildSourcePageContent(filename, parsed.summary, parsed.entities, parsed.concepts);
+    const summaryContent = buildSourcePageContent(filename, merged.summary, merged.entities, merged.concepts);
     await writePage(projectId, "sources", stem, summaryContent);
     result.createdPages.push(`sources/${stem}`);
   } catch (error) {
     result.errors.push(`Failed to write source page: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  for (const entity of parsed.entities) {
+  for (const entity of merged.entities) {
     try {
-      const entityContent = buildEntityPageContent(entity.name, entity.type, entity.description, filename);
       const existingIndex = await readIndex(projectId);
       const exists = existingIndex.some((e) => e.category === "entities" && e.name === entity.name);
 
-      await writePage(projectId, "entities", entity.name, entityContent);
       if (exists) {
-        result.updatedPages.push(`entities/${entity.name}`);
-      } else {
-        result.createdPages.push(`entities/${entity.name}`);
+        const existingPage = await readPage(projectId, "entities", entity.name);
+        if (existingPage) {
+          const mergedContent = await mergePageWithLlm(existingPage.content, entity.description, entity.type, filename, settings);
+          await writePage(projectId, "entities", entity.name, mergedContent);
+          result.updatedPages.push(`entities/${entity.name}`);
+          continue;
+        }
       }
+
+      const entityContent = buildEntityPageContent(entity.name, entity.type, entity.description, filename);
+      await writePage(projectId, "entities", entity.name, entityContent);
+      result.createdPages.push(`entities/${entity.name}`);
     } catch (error) {
       result.errors.push(`Failed to write entity ${entity.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  for (const concept of parsed.concepts) {
+  for (const concept of merged.concepts) {
     try {
-      const conceptContent = buildConceptPageContent(concept.name, concept.explanation, filename);
       const existingIndex = await readIndex(projectId);
       const exists = existingIndex.some((e) => e.category === "concepts" && e.name === concept.name);
 
-      await writePage(projectId, "concepts", concept.name, conceptContent);
       if (exists) {
-        result.updatedPages.push(`concepts/${concept.name}`);
-      } else {
-        result.createdPages.push(`concepts/${concept.name}`);
+        const existingPage = await readPage(projectId, "concepts", concept.name);
+        if (existingPage) {
+          const mergedContent = await mergePageWithLlm(existingPage.content, concept.explanation, undefined, filename, settings);
+          await writePage(projectId, "concepts", concept.name, mergedContent);
+          result.updatedPages.push(`concepts/${concept.name}`);
+          continue;
+        }
       }
+
+      const conceptContent = buildConceptPageContent(concept.name, concept.explanation, filename);
+      await writePage(projectId, "concepts", concept.name, conceptContent);
+      result.createdPages.push(`concepts/${concept.name}`);
     } catch (error) {
       result.errors.push(`Failed to write concept ${concept.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  for (const ref of merged.crossReferences) {
+    try {
+      await addCrossReference(projectId, ref, filename);
+    } catch {
+      // cross-reference failures are non-critical
     }
   }
 
@@ -138,6 +195,145 @@ export async function ingestSource(
   });
 
   return result;
+}
+
+async function mergePageWithLlm(
+  existingContent: string,
+  newExtract: string,
+  _entityType: string | undefined,
+  sourceFile: string,
+  settings: AppSettings
+): Promise<string> {
+  const truncatedExisting = existingContent.length > MAX_MERGE_CONTENT
+    ? existingContent.slice(0, MAX_MERGE_CONTENT) + "\n\n[... earlier content truncated ...]"
+    : existingContent;
+
+  const prompt = MERGE_PROMPT
+    .replace("{existingContent}", truncatedExisting)
+    .replace("{newExtract}", newExtract)
+    .replace("{sourceFile}", sourceFile);
+
+  const model = createModel(settings.utilityModel);
+
+  const { text } = await generateText({
+    model,
+    prompt,
+    temperature: 0.1,
+  });
+
+  const sourceStem = sourceFile.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+  const sourceLink = `- [${sourceFile}](../sources/${sourceStem}.md)`;
+
+  let result = text.trim();
+
+  if (!result.includes(sourceStem)) {
+    if (result.includes("## Sources")) {
+      result = result.replace(/(## Sources\n)/, `$1${sourceLink}\n`);
+    } else {
+      result += `\n\n## Sources\n\n${sourceLink}\n`;
+    }
+  }
+
+  return result;
+}
+
+async function addCrossReference(
+  projectId: string,
+  referenceName: string,
+  sourceFile: string
+): Promise<void> {
+  const sanitizedName = sanitizeName(referenceName);
+
+  const categories: WikiPageCategory[] = ["entities", "concepts"];
+  for (const category of categories) {
+    const existingPage = await readPage(projectId, category, sanitizedName);
+    if (existingPage) {
+      const sourceStem = sourceFile.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+      const sourceLink = `[${sourceFile}](../sources/${sourceStem}.md)`;
+
+      if (!existingPage.content.includes(sourceStem)) {
+        let updated = existingPage.content;
+        if (updated.includes("## Sources")) {
+          updated = updated.replace(/(## Sources\n)/, `$1- ${sourceLink}\n`);
+        } else {
+          updated += `\n\n## Sources\n\n- ${sourceLink}\n`;
+        }
+        await writePage(projectId, category, sanitizedName, updated);
+      }
+      return;
+    }
+  }
+}
+
+function chunkText(
+  text: string,
+  maxChars: number,
+  overlap: number,
+  maxChunks: number
+): string[] {
+  if (text.length <= maxChars) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < text.length && chunks.length < maxChunks) {
+    let end = Math.min(start + maxChars, text.length);
+
+    if (end < text.length) {
+      const lastParagraph = text.lastIndexOf("\n\n", end);
+      if (lastParagraph > start + maxChars * 0.5) {
+        end = lastParagraph;
+      }
+    }
+
+    chunks.push(text.slice(start, end));
+    start = end - overlap;
+    if (start >= text.length) break;
+  }
+
+  return chunks;
+}
+
+function mergeChunkResults(results: IngestResponse[]): IngestResponse {
+  if (results.length === 1) return results[0];
+
+  const summary = results[0].summary;
+
+  const entityMap = new Map<string, IngestEntity>();
+  for (const r of results) {
+    for (const e of r.entities) {
+      const existing = entityMap.get(e.name);
+      if (!existing || e.description.length > existing.description.length) {
+        entityMap.set(e.name, e);
+      }
+    }
+  }
+
+  const conceptMap = new Map<string, IngestConcept>();
+  for (const r of results) {
+    for (const c of r.concepts) {
+      const existing = conceptMap.get(c.name);
+      if (!existing || c.explanation.length > existing.explanation.length) {
+        conceptMap.set(c.name, c);
+      }
+    }
+  }
+
+  const crossRefSet = new Set<string>();
+  for (const r of results) {
+    for (const ref of r.crossReferences) {
+      crossRefSet.add(ref);
+    }
+  }
+
+  return {
+    summary,
+    entities: Array.from(entityMap.values()),
+    concepts: Array.from(conceptMap.values()),
+    crossReferences: Array.from(crossRefSet),
+  };
 }
 
 interface IngestEntity {

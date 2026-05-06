@@ -33,7 +33,7 @@ export interface WikiIngestResult {
 }
 
 export interface WikiLintIssue {
-  type: "orphan" | "stale" | "contradiction" | "missing_cross_reference" | "empty_page";
+  type: "orphan" | "stale" | "missing_cross_reference" | "empty_page";
   pagePath: string;
   description: string;
   severity: "info" | "warning" | "error";

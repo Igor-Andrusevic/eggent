@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import type { WikiPage, WikiPageCategory, WikiIndexEntry, WikiLogEntry } from "@/lib/wiki/types";
+import { upsertWikiEmbedding, deleteWikiEmbedding, clearEmbeddingsCache } from "@/lib/wiki/wiki-embeddings";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 
@@ -234,6 +235,9 @@ export async function writePage(
     sourceCount: undefined,
   });
 
+  const pagePath = `${category}/${name}.md`;
+  updateEmbeddingAsync(projectId, pagePath, content);
+
   return filePath;
 }
 
@@ -243,9 +247,11 @@ export async function deletePage(
   name: string
 ): Promise<boolean> {
   const filePath = getPagePath(projectId, category, name);
+  const pagePath = `${category}/${name}.md`;
   try {
     await fs.unlink(filePath);
     await removeIndexEntry(projectId, category, name);
+    deleteWikiEmbedding(projectId, pagePath).catch(() => {});
     return true;
   } catch {
     return false;
@@ -314,6 +320,7 @@ export async function readLog(
 
 export async function deleteWiki(projectId: string): Promise<void> {
   const wikiDir = getWikiDir(projectId);
+  clearEmbeddingsCache(projectId);
   try {
     await fs.rm(wikiDir, { recursive: true, force: true });
   } catch {
@@ -331,4 +338,14 @@ function extractSummary(content: string): string {
     }
   }
   return "No summary available.";
+}
+
+async function updateEmbeddingAsync(projectId: string, pagePath: string, content: string): Promise<void> {
+  try {
+    const { getSettings } = await import("@/lib/storage/settings-store");
+    const settings = await getSettings();
+    await upsertWikiEmbedding(projectId, pagePath, content, settings);
+  } catch {
+    // embedding update failure is non-critical
+  }
 }

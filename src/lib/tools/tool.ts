@@ -18,7 +18,7 @@ import {
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
 import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
-import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint } from "@/lib/wiki/wiki-engine";
+import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint, wikiGetStatus } from "@/lib/wiki/wiki-engine";
 import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
 import { createCronTool } from "@/lib/tools/cron-tool";
@@ -1401,6 +1401,15 @@ export async function createAgentTools(
       inputSchema: z.object({}),
       execute: async () => {
         return wikiLint(wikiProjectId);
+      },
+    });
+
+    tools.wiki_status = tool({
+      description:
+        "Get wiki statistics: total pages per category, recent log entries. Use this to understand the current state of the project's wiki.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        return wikiGetStatus(wikiProjectId);
       },
     });
   }
