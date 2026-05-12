@@ -35,6 +35,7 @@ import {
   saveExternalSession,
 } from "@/lib/storage/external-session-store";
 import { getAllProjects } from "@/lib/storage/project-store";
+import { formatTelegramReply } from "@/lib/utils/telegram-format";
 import {
   canUserAccessProject,
   getAccessibleProjects,
@@ -549,11 +550,12 @@ function extractAccessCodeCandidate(text: string): string | null {
   return null;
 }
 
-function normalizeOutgoingText(text: string): string {
+function normalizeOutgoingText(text: string): { text: string; parseMode?: string } {
   const value = text.trim();
-  if (!value) return "Пустой ответ от агента.";
-  if (value.length <= TELEGRAM_TEXT_LIMIT) return value;
-  return `${value.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`;
+  if (!value) return { text: "Пустой ответ от агента." };
+  const html = formatTelegramReply(value);
+  if (!html) return { text: "Пустой ответ от агента." };
+  return { text: html, parseMode: "HTML" };
 }
 
 async function sendTelegramMessage(
@@ -562,16 +564,23 @@ async function sendTelegramMessage(
   text: string,
   replyToMessageId?: number
 ): Promise<void> {
+  const normalized = normalizeOutgoingText(text);
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text: normalized.text,
+  };
+  if (normalized.parseMode) {
+    body.parse_mode = normalized.parseMode;
+  }
+  if (typeof replyToMessageId === "number") {
+    body.reply_to_message_id = replyToMessageId;
+  }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: normalizeOutgoingText(text),
-      ...(typeof replyToMessageId === "number" ? { reply_to_message_id: replyToMessageId } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 
   const payload = (await response.json().catch(() => null)) as
@@ -579,9 +588,31 @@ async function sendTelegramMessage(
     | null;
 
   if (!response.ok || !payload?.ok) {
-    throw new Error(
-      `Telegram sendMessage failed (${response.status})${payload?.description ? `: ${payload.description}` : ""}`
-    );
+    const errMsg = `Telegram sendMessage failed (${response.status})${payload?.description ? `: ${payload.description}` : ""}`;
+    if (payload?.description?.includes("can't parse entities")) {
+      console.warn("Telegram HTML parse error, retrying as plain text:", payload.description);
+      const plainText = text.trim() || "Пустой ответ от агента.";
+      const fallbackBody: Record<string, unknown> = {
+        chat_id: chatId,
+        text: plainText.length <= TELEGRAM_TEXT_LIMIT ? plainText : `${plainText.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`,
+      };
+      if (typeof replyToMessageId === "number") {
+        fallbackBody.reply_to_message_id = replyToMessageId;
+      }
+      const retry = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fallbackBody),
+      });
+      const retryPayload = (await retry.json().catch(() => null)) as
+        | { ok?: boolean; description?: string }
+        | null;
+      if (!retry.ok || !retryPayload?.ok) {
+        throw new Error(errMsg);
+      }
+      return;
+    }
+    throw new Error(errMsg);
   }
 }
 

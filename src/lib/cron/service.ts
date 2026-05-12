@@ -3,6 +3,7 @@ import { getAllProjects, getProject } from "@/lib/storage/project-store";
 import { getTelegramIntegrationRuntimeConfig } from "@/lib/storage/telegram-integration-store";
 import { runAgentText } from "@/lib/agent/agent";
 import { parseAbsoluteTimeMs } from "@/lib/cron/parse";
+import { formatTelegramReply } from "@/lib/utils/telegram-format";
 import { resolveCronRunLogPath, resolveCronStorePath, GLOBAL_CRON_PROJECT_ID } from "@/lib/cron/paths";
 import { appendCronRunLog, readCronRunLogEntries } from "@/lib/cron/run-log";
 import { computeNextRunAtMs, validateCronExpression } from "@/lib/cron/schedule";
@@ -553,13 +554,6 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
     }
   }
 
-  const normalizeOutgoingTelegramText = (text: string): string => {
-    const value = text.trim();
-    if (!value) return "Пустой ответ от cron-задачи.";
-    if (value.length <= TELEGRAM_TEXT_LIMIT) return value;
-    return `${value.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`;
-  };
-
   const formatTelegramCronResult = (result: RunResult): string => {
     if (result.status === "ok") {
       return `Cron "${job.name}" выполнен.\n\n${result.summary ?? "Без текста ответа."}`;
@@ -571,6 +565,12 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
   };
 
   const sendTelegramMessage = async (chatIdValue: string, text: string): Promise<void> => {
+    const html = formatTelegramReply(text);
+    const body: Record<string, unknown> = {
+      chat_id: chatIdValue,
+      text: html,
+      parse_mode: "HTML",
+    };
     const response = await fetch(
       `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
       {
@@ -578,10 +578,7 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          chat_id: chatIdValue,
-          text: normalizeOutgoingTelegramText(text),
-        }),
+        body: JSON.stringify(body),
       }
     );
 
@@ -590,6 +587,29 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
       | null;
 
     if (!response.ok || !payload?.ok) {
+      if (payload?.description?.includes("can't parse entities")) {
+        console.warn("Cron Telegram HTML parse error, retrying plain:", payload.description);
+        const plain = text.trim() || "Пустой ответ.";
+        const fallbackBody: Record<string, unknown> = {
+          chat_id: chatIdValue,
+          text: plain.length <= TELEGRAM_TEXT_LIMIT ? plain : `${plain.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`,
+        };
+        const retry = await fetch(
+          `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fallbackBody),
+          }
+        );
+        const retryPayload = (await retry.json().catch(() => null)) as
+          | { ok?: boolean; description?: string }
+          | null;
+        if (!retry.ok || !retryPayload?.ok) {
+          throw new Error(`Telegram sendMessage failed (${retry.status})`);
+        }
+        return;
+      }
       throw new Error(
         `Telegram sendMessage failed (${response.status})${payload?.description ? `: ${payload.description}` : ""}`
       );
