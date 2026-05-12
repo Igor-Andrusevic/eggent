@@ -16,7 +16,8 @@ export interface ModelConfig {
     | "custom"
     | "codex-cli"
     | "gemini-cli"
-    | "zhipuai";
+    | "zhipuai"
+    | "deepseek";
   model: string;
   apiKey?: string;
   authMethod?: ChatAuthMethod;

@@ -134,6 +134,21 @@ export const MODEL_PROVIDERS: Record<string, ProviderConfig> = {
       },
     },
   },
+  deepseek: {
+    name: "DeepSeek",
+    models: [
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash (Thinking)" },
+      { id: "deepseek-v4-flash:no-think", name: "DeepSeek V4 Flash" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { id: "deepseek-chat", name: "DeepSeek Chat (Legacy)" },
+      { id: "deepseek-reasoner", name: "DeepSeek Reasoner (Legacy)" },
+    ],
+    envKey: "DEEPSEEK_API_KEY",
+    baseUrl: "https://api.deepseek.com",
+    requiresApiKey: true,
+    authMethods: ["api_key"],
+    defaultAuthMethod: "api_key",
+  },
   "zhipuai": {
     name: "Zhipu AI (GLM)",
     models: [

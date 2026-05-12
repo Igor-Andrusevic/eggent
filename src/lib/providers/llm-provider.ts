@@ -1565,6 +1565,24 @@ function createZhipuaiFetchWrapper(): typeof fetch {
   };
 }
 
+function createDeepseekFetchWrapper(): typeof fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST" && init.body) {
+      try {
+        const body = JSON.parse(init.body as string);
+        if (body.model && typeof body.model === "string" && body.model.endsWith(":no-think")) {
+          body.model = body.model.replace(/:no-think$/, "");
+          body.thinking = { type: "disabled" };
+          init = { ...init, body: JSON.stringify(body) };
+        }
+      } catch {
+        // If parsing fails, proceed with original request
+      }
+    }
+    return fetch(input, init);
+  };
+}
+
 function createOpenAICompatibleChatModel(
   config: ModelConfig,
   settings: OpenAICompatibleSettings
@@ -1573,11 +1591,15 @@ function createOpenAICompatibleChatModel(
     normalizeBaseUrl(config.baseUrl, settings)
   );
   const dropAuthorization = settings.allowMissingApiKey === true && !settings.apiKey.trim();
+  const fetchWrapper =
+    settings.providerName === "zhipuai" ? createZhipuaiFetchWrapper() :
+    settings.providerName === "deepseek" ? createDeepseekFetchWrapper() :
+    createOpenAICompatibleFetch(dropAuthorization);
   const provider = createOpenAI({
     apiKey: settings.apiKey || "__no_api_key__",
     baseURL,
     name: settings.providerName,
-    fetch: settings.providerName === "zhipuai" ? createZhipuaiFetchWrapper() : createOpenAICompatibleFetch(dropAuthorization),
+    fetch: fetchWrapper,
   });
   return provider.chat(config.model);
 }
@@ -1656,6 +1678,14 @@ export function createModel(
         apiKey: config.apiKey || process.env.ZHIPUAI_API_KEY || "",
         fallbackBaseUrl: "https://api.z.ai/api/coding/paas/v4/",
         defaultPath: "/",
+      });
+    }
+
+    case "deepseek": {
+      return createOpenAICompatibleChatModel(config, {
+        providerName: "deepseek",
+        apiKey: config.apiKey || process.env.DEEPSEEK_API_KEY || "",
+        fallbackBaseUrl: "https://api.deepseek.com",
       });
     }
 

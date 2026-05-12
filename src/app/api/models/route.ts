@@ -99,6 +99,7 @@ export async function GET(req: NextRequest) {
                     anthropic: process.env.ANTHROPIC_API_KEY,
                     google: process.env.GOOGLE_API_KEY,
                     zhipuai: process.env.ZHIPUAI_API_KEY,
+                    deepseek: process.env.DEEPSEEK_API_KEY,
                 };
                 apiKey = envMap[provider] || "";
             }
@@ -264,6 +265,18 @@ export async function GET(req: NextRequest) {
                 } catch {
                     models = [...fallback];
                 }
+                break;
+            }
+
+            case "deepseek": {
+                const res = await fetch("https://api.deepseek.com/models", {
+                    headers: { Authorization: `Bearer ${apiKey}` },
+                });
+                if (!res.ok) throw new Error(`DeepSeek API error: ${res.status}`);
+                const data = await res.json();
+                models = (data.data || [])
+                    .map((m: { id: string }) => ({ id: m.id, name: m.id }))
+                    .sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
                 break;
             }
 
