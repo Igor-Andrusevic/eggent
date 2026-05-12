@@ -158,7 +158,7 @@ function useModels(
       if (payload.models?.length) {
         setModels(payload.models);
       } else {
-        const staticProviders = ["codex-cli", "gemini-cli", "zhipuai"];
+        const staticProviders = ["codex-cli", "gemini-cli", "zhipuai", "deepseek"];
         if (staticProviders.includes(provider) && providerConfig?.models?.length) {
           setModels([...providerConfig.models]);
         } else if (providerConfig?.models?.length) {

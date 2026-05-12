@@ -1570,11 +1570,27 @@ function createDeepseekFetchWrapper(): typeof fetch {
     if (init?.method === "POST" && init.body) {
       try {
         const body = JSON.parse(init.body as string);
-        if (body.model && typeof body.model === "string" && body.model.endsWith(":no-think")) {
+        if (!body.model || typeof body.model !== "string") {
+          return fetch(input, init);
+        }
+
+        const isNoThink = body.model.endsWith(":no-think");
+        if (isNoThink) {
           body.model = body.model.replace(/:no-think$/, "");
           body.thinking = { type: "disabled" };
-          init = { ...init, body: JSON.stringify(body) };
         }
+
+        if (Array.isArray(body.messages)) {
+          for (const msg of body.messages) {
+            if (msg.role === "assistant" && !isNoThink) {
+              if (!("reasoning_content" in msg)) {
+                msg.reasoning_content = "reasoning";
+              }
+            }
+          }
+        }
+
+        init = { ...init, body: JSON.stringify(body) };
       } catch {
         // If parsing fails, proceed with original request
       }

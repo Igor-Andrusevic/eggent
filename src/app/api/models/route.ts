@@ -268,18 +268,6 @@ export async function GET(req: NextRequest) {
                 break;
             }
 
-            case "deepseek": {
-                const res = await fetch("https://api.deepseek.com/models", {
-                    headers: { Authorization: `Bearer ${apiKey}` },
-                });
-                if (!res.ok) throw new Error(`DeepSeek API error: ${res.status}`);
-                const data = await res.json();
-                models = (data.data || [])
-                    .map((m: { id: string }) => ({ id: m.id, name: m.id }))
-                    .sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
-                break;
-            }
-
             default: {
                 const providerConfig = MODEL_PROVIDERS[provider];
                 if (providerConfig) {
