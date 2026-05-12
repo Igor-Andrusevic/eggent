@@ -5,7 +5,7 @@
     <img src="./docs/assets/eggent-banner.png" alt="Eggent banner" width="980" />
 </p>
 
-> Форк [eggent-ai/eggent](https://github.com/eggent-ai/eggent) с дополнительными возможностями: Zhipu AI GLM-5.1, cron-автоматизация с выбором модели, улучшенная интеграция Telegram, автообновления и мониторинг.
+> Форк [eggent-ai/eggent](https://github.com/eggent-ai/eggent) с дополнительными возможностями: DeepSeek V4, Zhipu AI GLM-5.1, cron-автоматизация с выбором модели, улучшенная интеграция Telegram, автообновления и мониторинг.
 
 Eggent — локальная AI-платформа для создания команды специализированных агентов. Создавайте агентов с собственными навыками и MCP-серверами, переключайтесь между ними на естественном языке и делегируйте задачи наиболее подходящему агенту.
 
@@ -18,13 +18,29 @@ Eggent — локальная AI-платформа для создания ко
 - **Интеграция MCP** — подключайте внешние инструменты через Model Context Protocol
 - **Cron-автоматизация** — планируйте повторяющиеся задачи и напоминания с выбором модели для каждой задачи
 - **Интеграция Telegram** — общайтесь с агентами из Telegram
-- **Мультипровайдер** — OpenAI, Anthropic, Google Gemini, Zhipu AI (GLM-5.1), OpenRouter
+- **Мультипровайдер** — OpenAI, Anthropic, Google Gemini, DeepSeek, Zhipu AI (GLM-5.1), OpenRouter, Ollama, Codex CLI, Gemini CLI
 - **Веб-поиск и чтение страниц** — поиск через Tavily + инструмент `web_fetch` для прямых ссылок
 
 - **37 встроенных навыков** — включая Bitrix24, SendforSign, NotebookLM, мониторинг серверов, YouTube-поиск
 
+### Поддерживаемые AI-провайдеры
+
+| Провайдер | Модели | API Key | Auth |
+| --- | --- | --- | --- |
+| **OpenAI** | GPT-4o, o1, o3, o4, GPT-5.x (динамический список) | `OPENAI_API_KEY` | API Key |
+| **Anthropic** | Claude (динамический список) | `ANTHROPIC_API_KEY` | API Key |
+| **Google** | Gemini 2.5 Pro/Flash, Gemma 4 | `GOOGLE_API_KEY` | API Key |
+| **DeepSeek** | V4 Flash (Thinking/No-Thinking), V4 Pro | `DEEPSEEK_API_KEY` | API Key |
+| **Zhipu AI** | GLM-5.1, GLM-5 Turbo, GLM-4.7 Flash (FREE) | `ZHIPUAI_API_KEY` | API Key |
+| **OpenRouter** | 200+ моделей (динамический список) | `OPENROUTER_API_KEY` | API Key |
+| **Ollama** | Локальные модели | Не требуется | — |
+| **Codex CLI** | GPT-5.x Codex | Не требуется | OAuth |
+| **Gemini CLI** | Gemini 3.1/2.5 | Не требуется | OAuth |
+| **Custom** | Любой OpenAI-совместимый API | Зависит | API Key |
+
 ### Кастомные улучшения форка
 
+- **DeepSeek V4** — поддержка DeepSeek V4 Flash (thinking/no-thinking) и V4 Pro, автоматическая обработка `reasoning_content` для multi-turn диалогов
 - **Zhipu AI (GLM-5.1)** — поддержка модели GLM-5.1 Coding Plan с автоматическим `baseUrl`, валидация порядка инструментов и повтор с сокращённой историей при ошибке 400
 - **Cron с выбором модели** — каждая cron-задача может использовать свою модель (GLM-5.1 для одних задач, GPT-4o для других)
 - **Cron UI** — редактирование задач в интерфейсе, human-readable расписание, селектор модели
@@ -40,6 +56,16 @@ Eggent — локальная AI-платформа для создания ко
 - **Gemini совместимость** — объединение последовательных сообщений ассистента, валидация истории для предотвращения ошибок API 400
 
 ## Что нового
+
+### Май 2026 — DeepSeek V4 Integration
+
+Интеграция DeepSeek API (OpenAI-совместимый):
+
+- **DeepSeek V4 Flash** — модель с режимами thinking (по умолчанию) и no-thinking
+- **DeepSeek V4 Pro** — флагманская модель (1M контекст, 384K max output)
+- **Thinking mode** — автоматическая обработка `reasoning_content` в multi-turn диалогах (инжект в историю сообщений)
+- **No-thinking mode** — модель `deepseek-v4-flash:no-think` с `thinking: { type: "disabled" }`
+- **Legacy алиасы** — `deepseek-chat` и `deepseek-reasoner` (будут удалены 2026/07/24)
 
 ### Апрель 2026 — Wiki Knowledge Base (LLM Wiki)
 
@@ -73,6 +99,7 @@ Raw Sources → [Wiki Layer: summaries, entities, concepts, synthesis] → LLM A
 
 ### Кастомные изменения форка (после v0.1.5)
 
+- **DeepSeek V4** — интеграция API с поддержкой thinking/no-thinking режимов
 - **GLM-5.1 Coding Plan** — апгрейд провайдера Zhipu AI с GLM-5 Turbo до GLM-5.1
 - **Cron: per-task модель** — каждая cron-задача может использовать отдельную модель и провайдер
 - **Cron UI** — редактирование задач, человекочитаемое расписание, селектор модели в интерфейсе
@@ -107,7 +134,7 @@ Raw Sources → [Wiki Layer: summaries, entities, concepts, synthesis] → LLM A
 
 ## Cron: выбор модели для каждой задачи
 
-По умолчанию cron-задачи используют глобальную модель из настроек (`chatModel`). Но можно указать отдельную модель для конкретной задачи — например, GLM-5.1 для тяжёлых задач или GPT-4o-mini для простых уведомлений.
+По умолчанию cron-задачи используют глобальную модель из настроек (`chatModel`). Но можно указать отдельную модель для конкретной задачи — например, GLM-5.1 для тяжёлых задач, DeepSeek V4 Flash для быстрых или GPT-4o-mini для простых уведомлений.
 
 ### Пример через API
 
@@ -121,8 +148,8 @@ curl -X POST http://localhost:3000/api/projects/<project-id>/cron \
       "kind": "agentTurn",
       "message": "Составь утренний отчёт по серверам",
       "model": {
-        "provider": "zhipuai",
-        "model": "glm-5.1",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash:no-think",
         "apiKey": "your-api-key"
       }
     }
@@ -133,11 +160,11 @@ curl -X POST http://localhost:3000/api/projects/<project-id>/cron \
 
 Просто скажите агенту, какую модель использовать:
 
-> «Создай cron-задачу на каждый день в 9 утра: составь отчёт по серверам. Используй модель glm-5.1»
+> «Создай cron-задачу на каждый день в 9 утра: составь отчёт по серверам. Используй модель deepseek»
 
 ### Доступные провайдеры
 
-`openai`, `anthropic`, `google`, `openrouter`, `zhipuai`, `ollama`, `custom`
+`openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `zhipuai`, `ollama`, `codex-cli`, `gemini-cli`, `custom`
 
 Если `model` не указан — используется глобальная модель из настроек.
 
@@ -249,9 +276,10 @@ TELEGRAM_UPDATE_NOTIFICATIONS=<chat_id>
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=AIza...
-ZHIPUAI_API_KEY=...               # GLM-5.1
+DEEPSEEK_API_KEY=sk-...              # DeepSeek V4 Flash/Pro
+ZHIPUAI_API_KEY=...                  # GLM-5.1
 OPENROUTER_API_KEY=...
-TAVILY_API_KEY=...                # Веб-поиск
+TAVILY_API_KEY=...                   # Веб-поиск
 
 # Telegram интеграция
 TELEGRAM_BOT_TOKEN=your_bot_token
