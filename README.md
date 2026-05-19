@@ -5,25 +5,23 @@
     <img src="./docs/assets/eggent-banner.png" alt="Eggent banner" width="980" />
 </p>
 
-> Форк [eggent-ai/eggent](https://github.com/eggent-ai/eggent) с дополнительными возможностями: DeepSeek V4, Zhipu AI GLM-5.1, cron-автоматизация с выбором модели, улучшенная интеграция Telegram, автообновления и мониторинг.
+> Форк [eggent-ai/eggent](https://github.com/eggent-ai/eggent) с дополнительными возможностями: DeepSeek V4, Zhipu AI GLM-5.1, cron-автоматизация с fallback-моделями, улучшенная интеграция Telegram, автообновления и мониторинг.
 
 Eggent — локальная AI-платформа для создания команды специализированных агентов. Создавайте агентов с собственными навыками и MCP-серверами, переключайтесь между ними на естественном языке и делегируйте задачи наиболее подходящему агенту.
 
 ## Возможности
 
-- **Мультиагентная архитектура** — создавайте специализированных агентов с уникальными наборами навыков
+- **Мультиагентная архитектура** — специализированные агенты с уникальными наборами навыков
 - **Организация по проектам** — изолированные контексты, файлы и базы знаний
-- **Память и знания** — векторное хранилище с семантическим поиском (RAG) + LLM Wiki (компилированная база знаний)
-- **Wiki Knowledge Base** — автоматическая компиляция источников в wiki-страницы (summaries, entities, concepts, synthesis) с cross-references
-- **Интеграция MCP** — подключайте внешние инструменты через Model Context Protocol
-- **Cron-автоматизация** — планируйте повторяющиеся задачи и напоминания с выбором модели для каждой задачи
-- **Интеграция Telegram** — общайтесь с агентами из Telegram
-- **Мультипровайдер** — OpenAI, Anthropic, Google Gemini, DeepSeek, Zhipu AI (GLM-5.1), OpenRouter, Ollama, Codex CLI, Gemini CLI
+- **Гибридная память** — векторное хранилище с RAG + LLM Wiki (compiled knowledge base по паттерну Karpathy)
+- **Мультипровайдер** — OpenAI, Anthropic, Google Gemini, DeepSeek V4, Zhipu AI (GLM-5.1), OpenRouter, Ollama, Codex CLI, Gemini CLI
+- **Cron-автоматизация** — повторяющиеся задачи с выбором модели и fallback на альтернативных провайдерах при ошибках
+- **Интеграция Telegram** — общение с агентами из Telegram, автоимпорт файлов, транскрибирование голосовых, HTML-форматирование ответов
+- **Интеграция MCP** — подключение внешних инструментов через Model Context Protocol
 - **Веб-поиск и чтение страниц** — поиск через Tavily + инструмент `web_fetch` для прямых ссылок
+- **37 встроенных навыков** — Bitrix24, SendforSign, NotebookLM, мониторинг серверов, YouTube-поиск и др.
 
-- **37 встроенных навыков** — включая Bitrix24, SendforSign, NotebookLM, мониторинг серверов, YouTube-поиск
-
-### Поддерживаемые AI-провайдеры
+## Поддерживаемые AI-провайдеры
 
 | Провайдер | Модели | API Key | Auth |
 | --- | --- | --- | --- |
@@ -38,145 +36,35 @@ Eggent — локальная AI-платформа для создания ко
 | **Gemini CLI** | Gemini 3.1/2.5 | Не требуется | OAuth |
 | **Custom** | Любой OpenAI-совместимый API | Зависит | API Key |
 
-### Кастомные улучшения форка
+## Улучшения форка
 
-- **DeepSeek V4** — поддержка DeepSeek V4 Flash (thinking/no-thinking) и V4 Pro, автоматическая обработка `reasoning_content` для multi-turn диалогов
-- **Zhipu AI (GLM-5.1)** — поддержка модели GLM-5.1 Coding Plan с автоматическим `baseUrl`, валидация порядка инструментов и повтор с сокращённой историей при ошибке 400
-- **Cron с выбором модели** — каждая cron-задача может использовать свою модель (GLM-5.1 для одних задач, GPT-4o для других)
-- **Cron UI** — редактирование задач в интерфейсе, human-readable расписание, селектор модели
-- **Cron автозапуск** — шедулер запускается автоматически при старте сервера + retry для уведомлений Telegram
-- **Автоматическое транскрибирование аудио** — голосовые сообщения в Telegram расшифровываются через Gemini Flash
-- **Telegram HTML-форматирование** — ответы ИИ рендерятся с bold, italic, code, links; таблицы конвертируются в списки
-- **Автоимпорт файлов из Telegram** — документы, отправленные в Telegram, автоматически попадают в базу знаний
+### AI-провайдеры
+- **DeepSeek V4** — поддержка Flash (thinking/no-thinking) и Pro, автоматическая обработка `reasoning_content` для multi-turn диалогов
+- **Zhipu AI GLM-5.1** — автоматический `baseUrl`, валидация порядка инструментов, повтор с сокращённой историей при ошибке 400
+- **Gemini-совместимость** — объединение последовательных сообщений ассистента, валидация истории для API
+
+### Cron
+- **Выбор модели для задачи** — каждая cron-задача может использовать свою модель (GLM-5.1 для тяжёлых, DeepSeek V4 Flash для быстрых или GPT-4o-mini для простых уведомлений)
+- **Fallback при ошибке модели** — если основная модель недоступна (401, 403, 429, billing и т.д.), cron автоматически перебирает альтернативных провайдеров: Google → DeepSeek → OpenAI → Anthropic → OpenRouter → Zhipu
+- **UI редактирования** — интерфейс для управления задачами, человекочитаемое расписание, селектор модели
+- **Автозапуск шедулера** — стартует при запуске сервера, retry для Telegram-уведомлений
+
+### Telegram
+- **HTML-форматирование** — ответы ИИ с bold, italic, code, links; таблицы конвертируются в списки; fallback на plain text при ошибке парсинга
+- **Автоимпорт файлов** — документы из Telegram автоматически попадают в базу знаний проекта
+- **Транскрибирование голосовых** — через Gemini Flash (бесплатно)
+- **Автоопределение таймзоны** — по языковым настройкам (30+ языков)
 - **Быстрое переключение проектов** — команды `/<имя_проекта>` и алиасы `/family`, `/work`, `/monitoring`
-- **Автоопределение таймзоны** — по языковым настройкам Telegram (30+ языков)
-- **Автообновление с уведомлениями** — автоматический `git pull` из upstream с отчётом в Telegram (с 10:00 до 21:00)
-- **Мониторинг серверов** — навыки для мониторинга Docker-контейнеров через CLI
-- **NotebookLM** — встроенный навык для генерации подкастов через Google NotebookLM
-- **YouTube-поиск** — yt-dlp в Docker-образе для навыка last30days
-- **Gemini совместимость** — объединение последовательных сообщений ассистента, валидация истории для предотвращения ошибок API 400
 
-## Что нового
+### Инфраструктура
+- **Автообновление из upstream** — `auto-update.sh` с авто-abort зависших rebase, `--include-untracked` stash, очистка старых backup-веток, уведомления в Telegram (10:00–21:00)
+- **Мониторинг серверов** — навыки для проверки Docker-контейнеров через CLI
+- **Контроль свободного места** — `backup-eggent.sh` проверяет диск перед созданием бэкапа (MIN_FREE_SPACE_GB=2)
 
-### Май 2026 — Telegram HTML Formatting + DeepSeek V4
-
-**Telegram: рендеринг ответов в HTML** — ответы ИИ теперь отображаются с форматированием в Telegram (bold, italic, code, links, blockquotes). Ранее Markdown отправлялся как plain text — пользователь видел `**жирный**`, `## заголовки`, `| таблицы |`.
-
-- **Markdown → Telegram HTML конвертер** — `src/lib/utils/telegram-format.ts`: bold, italic, code, pre, links, blockquotes, таблицы → именованные списки
-- **`parse_mode: "HTML"`** во всех `sendMessage` вызовах (вебхук + cron) с fallback на plain text при ошибке парсинга
-- **Обновлённые промпты** — `tool-response.md` и `system.md`: инструкции ИИ не использовать markdown-таблицы и `#`-заголовки, вместо них — `**bold**` и списки
-- **Cron-уведомления** — тоже с HTML-форматированием
-
-### Май 2026 — DeepSeek V4 Integration
-
-Интеграция DeepSeek API (OpenAI-совместимый):
-
-- **DeepSeek V4 Flash** — модель с режимами thinking (по умолчанию) и no-thinking
-- **DeepSeek V4 Pro** — флагманская модель (1M контекст, 384K max output)
-- **Thinking mode** — автоматическая обработка `reasoning_content` в multi-turn диалогах (инжект в историю сообщений)
-- **No-thinking mode** — модель `deepseek-v4-flash:no-think` с `thinking: { type: "disabled" }`
-- **Legacy алиасы** — `deepseek-chat` и `deepseek-reasoner` (будут удалены 2026/07/24)
-
-### Апрель 2026 — Wiki Knowledge Base (LLM Wiki)
-
-Новый алгоритм запоминания и извлечения данных на основе [паттерна LLM Wiki от Andrej Karpathy](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). Вместо чистого RAG (пере-извлечение чанков при каждом запросе) — LLM поддерживает **персистентную компилированную wiki** из markdown-страниц, которая растёт и обогащается с каждым новым источником.
-
-**Архитектура (гибридная Wiki + RAG):**
-
-```
-Raw Sources → [Wiki Layer: summaries, entities, concepts, synthesis] → LLM Agent
-                          ↓
-                    [RAG fallback: embeddings, vector search]
-```
-
-- **Wiki Ingest** — при загрузке файла LLM автоматически читает его, создаёт summary-страницу, извлекает entities и concepts, обновляет cross-references
-- **Wiki Query** — первичный поиск по компилированной wiki (index.md → релевантные страницы → синтез ответа)
-- **Knowledge Query (RAG)** — fallback для точных запросов к сырым документам
-- **Wiki Lint** — проверка wiki на orphan-страницы, устаревшие ссылки, противоречия
-- **Wiki Create Page** — сохранение полезных ответов/анализов обратно в wiki
-
-**5 новых инструментов:** `wiki_query`, `wiki_read_page`, `wiki_create_page`, `wiki_ingest`, `wiki_lint`
-
-**48 тестов** для wiki-модуля (vitest).
-
-### Апрель 2026 — Упрощение cron и исправление провайдеров
-
-- **Cron: упрощение шедулера** — убрано verbose-логирование (tickCount, тайминги), удалена функция восстановления зависших задач `recoverStaleRunningJobs`
-- **Cron: унификация лимитов** — cron-задачи теперь используют стандартный лимит `MAX_TOOL_STEPS_PER_TURN = 15` (ранее отдельный `MAX_TOOL_STEPS_CRON = 30`)
-- **Cron: уменьшение timeout** — `DEFAULT_JOB_TIMEOUT_MS` сокращён с 20 до 10 минут
-- **Custom провайдер: обязательный API key** — удалена поддержка опционального API key (`allowMissingApiKey`) для OpenAI-совместимых провайдеров, теперь API key обязателен
-- **Исправление загрузки моделей** — убраны дублирующие функции нормализации URL для custom провайдера, упрощена логика `createOpenAICompatibleChatModel`
-
-### Кастомные изменения форка (после v0.1.5)
-
-- **DeepSeek V4** — интеграция API с поддержкой thinking/no-thinking режимов
-- **GLM-5.1 Coding Plan** — апгрейд провайдера Zhipu AI с GLM-5 Turbo до GLM-5.1
-- **Cron: per-task модель** — каждая cron-задача может использовать отдельную модель и провайдер
-- **Cron UI** — редактирование задач, человекочитаемое расписание, селектор модели в интерфейсе
-- **Cron автозапуск** — шедулер стартует автоматически при запуске сервера, retry для Telegram-уведомлений
-- **NotebookLM bundled skill** — встроенный навык генерации подкастов (заменён git submodule)
-- **yt-dlp** — добавлен в Docker-образ для YouTube-поиска в навыке last30days
-- **Мониторинг навыков** — обновлены для работы с node user в Docker-группе
-- **Bitrix24 и SendforSign** — новые встроенные навыки
-- **Безопасность** — обновлён Next.js до 15.5.14
-- **Аудио** — улучшена надёжность транскрибации голосовых сообщений (точный поиск файлов, нативный HTTP)
-- **Docker** — pinned версия bun для предотвращения 404 при установке
-
-### v0.1.5 — Web Fetch для прямых ссылок (upstream)
-
-- Новый инструмент `web_fetch` для открытия и чтения конкретных URL
-- Извлечение текста из HTML, обработка JSON/text, таймауты и лимиты размера ответа
-- `search_web` теперь только для поиска, прямые ссылки обрабатываются через `web_fetch`
-- Обновлённый UI вывода инструментов (метка `Web Fetch` + превью URL)
-
-## Релизы
-
-- Архив релизов: [docs/releases/README.md](./docs/releases/README.md)
-- Последний upstream-релиз: [v0.1.5 — Web Fetch for Direct Links](./docs/releases/0.1.5-web-fetch-direct-links.md)
-
-## Участие и поддержка
-
-- Руководство для контрибьюторов: [CONTRIBUTING.md](./CONTRIBUTING.md)
-- Сообщить об ошибке: [Форма баг-репорта](https://github.com/eggent-ai/eggent/issues/new?template=bug_report.yml)
-- Предложить фичу: [Форма запроса](https://github.com/eggent-ai/eggent/issues/new?template=feature_request.yml)
-- Кодекс поведения: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
-- Политика безопасности: [SECURITY.md](./SECURITY.md)
-
-## Cron: выбор модели для каждой задачи
-
-По умолчанию cron-задачи используют глобальную модель из настроек (`chatModel`). Но можно указать отдельную модель для конкретной задачи — например, GLM-5.1 для тяжёлых задач, DeepSeek V4 Flash для быстрых или GPT-4o-mini для простых уведомлений.
-
-### Пример через API
-
-```bash
-curl -X POST http://localhost:3000/api/projects/<project-id>/cron \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Утренний отчёт",
-    "schedule": { "kind": "cron", "expr": "0 9 * * *" },
-    "payload": {
-      "kind": "agentTurn",
-      "message": "Составь утренний отчёт по серверам",
-      "model": {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash:no-think",
-        "apiKey": "your-api-key"
-      }
-    }
-  }'
-```
-
-### Пример через чат с агентом
-
-Просто скажите агенту, какую модель использовать:
-
-> «Создай cron-задачу на каждый день в 9 утра: составь отчёт по серверам. Используй модель deepseek»
-
-### Доступные провайдеры
-
-`openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `zhipuai`, `ollama`, `codex-cli`, `gemini-cli`, `custom`
-
-Если `model` не указан — используется глобальная модель из настроек.
+### Встроенные навыки
+- **NotebookLM** — генерация подкастов
+- **YouTube-поиск** — `yt-dlp` в Docker-образе
+- **Bitrix24, SendforSign** — дополнительные навыки в комплекте
 
 ## Установка
 
@@ -198,12 +86,12 @@ curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/insta
 - Клонирует/обновляет Eggent в `~/.eggent`
 - Запускает Docker-деплой
 
-Переменные окружения установщика:
-- `EGGENT_INSTALL_DIR`: целевая директория (по умолчанию: `~/.eggent`)
-- `EGGENT_BRANCH`: ветка git (по умолчанию: `main`)
-- `EGGENT_REPO_URL`: URL репозитория (по умолчанию: `https://github.com/eggent-ai/eggent.git`)
-- `EGGENT_AUTO_INSTALL_DOCKER`: `1`/`0` (по умолчанию: `1`)
-- `EGGENT_APP_BIND_HOST`: хост привязки Docker (Linux: `0.0.0.0`, иначе `127.0.0.1`)
+Переменные окружения:
+- `EGGENT_INSTALL_DIR` — целевая директория (по умолчанию: `~/.eggent`)
+- `EGGENT_BRANCH` — ветка git (по умолчанию: `main`)
+- `EGGENT_REPO_URL` — URL репозитория (по умолчанию: `https://github.com/eggent-ai/eggent.git`)
+- `EGGENT_AUTO_INSTALL_DOCKER` — `1`/`0` (по умолчанию: `1`)
+- `EGGENT_APP_BIND_HOST` — хост привязки Docker (Linux: `0.0.0.0`, иначе `127.0.0.1`)
 
 ### 2. Docker-деплой
 
@@ -237,25 +125,11 @@ npm run start
 
 Перед обновлением сделайте резервные копии `.env` и `data/`.
 
-Если установлен через однокомандный установщик — запустите ту же команду снова:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/eggent-ai/eggent/main/scripts/install.sh | bash
-```
-
-Если запускаете из репозитория через Docker:
-
-```bash
-git pull --ff-only origin main
-npm run setup:docker
-```
-
-Если запускаете локально (Node + npm):
-
-```bash
-git pull --ff-only origin main
-npm run setup:local
-```
+| Метод установки | Команда обновления |
+| --- | --- |
+| Однокомандный установщик | Запустить ту же команду `curl ... \| bash` |
+| Docker (из репозитория) | `git pull --ff-only origin main && npm run setup:docker` |
+| Локально (Node + npm) | `git pull --ff-only origin main && npm run setup:local` |
 
 Проверка после обновления:
 
@@ -263,15 +137,15 @@ npm run setup:local
 curl http://localhost:3000/api/health
 ```
 
-### Автообновление (кастомная функция)
+### Автообновление
 
-Скрипт `scripts/auto-update.sh` автоматически подтягивает изменения из upstream и отправляет уведомление в Telegram. Работает с 10:00 до 21:00. Для настройки укажите в `.env`:
+Скрипт `scripts/auto-update.sh` автоматически подтягивает изменения из upstream, разрешает конфликты rebase и отправляет отчёт в Telegram. Для настройки укажите в `.env`:
 
 ```
 TELEGRAM_UPDATE_NOTIFICATIONS=<chat_id>
 ```
 
-Настройте cron для регулярного запуска:
+Добавьте в cron (запуск каждые 2 часа с 10:00 до 21:00):
 
 ```bash
 0 */2 10-21 * * cd ~/.eggent && bash scripts/auto-update.sh
@@ -323,20 +197,57 @@ data/
 │   │   │   ├── entities/       # Сущности (люди, организации, места)
 │   │   │   ├── concepts/       # Концепции и темы
 │   │   │   └── synthesis/      # Кросс-анализы
-│   │   └── skills/             # Кастомные навыки проекта
+│   │   ├── skills/             # Кастомные навыки проекта
+│   │   └── mcp/                # Конфигурация MCP-серверов
 │   └── memory/                 # Векторная БД
 ├── external-sessions/          # Состояние сессий Telegram
 ├── user-preferences/           # Таймзона и локаль пользователей
 ├── chats/                      # История чатов
-└── chat-files/                 # Загруженные файлы
+├── chat-files/                 # Загруженные файлы
+└── cron/main/                  # Cron-задачи и логи выполнения
 ```
+
+## Cron: выбор модели и fallback
+
+По умолчанию cron-задачи используют глобальную модель из настроек (`chatModel`). Для конкретной задачи можно указать свою модель. При ошибке (401, 403, 429, billing, timeout и т.д.) cron автоматически перебирает доступных провайдеров.
+
+### Пример через API
+
+```bash
+curl -X POST http://localhost:3000/api/projects/<project-id>/cron \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Утренний отчёт",
+    "schedule": { "kind": "cron", "expr": "0 9 * * *" },
+    "payload": {
+      "kind": "agentTurn",
+      "message": "Составь утренний отчёт по серверам",
+      "model": {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash:no-think",
+        "apiKey": "your-api-key"
+      }
+    }
+  }'
+```
+
+### Пример через чат с агентом
+
+> «Создай cron-задачу на каждый день в 9 утра: составь отчёт по серверам. Используй модель deepseek»
+
+### Доступные провайдеры
+
+`openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `zhipuai`, `ollama`, `codex-cli`, `gemini-cli`, `custom`
+
+Если `model` не указан — используется глобальная модель из настроек. Если указанная модель недоступна — cron пробует альтернативных провайдеров (Google → DeepSeek → OpenAI → Anthropic → OpenRouter → Zhipu), проверяя наличие API-ключей в `.env`.
 
 ## Интеграция Telegram
 
 - **Вебхуки** — обработка сообщений в реальном времени
+- **HTML-форматирование** — bold, italic, code, links, списки; таблицы → именованные списки
 - **Автоимпорт файлов** — документы из Telegram автоматически попадают в базу знаний
 - **Транскрибирование голосовых** — через Gemini Flash (бесплатно) или OpenAI Whisper
-- **Определение таймзоны** — автоматически по языковым настройкам пользователя
+- **Автоопределение таймзоны** — по языковым настройкам пользователя
 - **Управление доступом** — авторизация по белому списку user_id
 
 ### Команды Telegram
@@ -366,7 +277,7 @@ data/
 - **UI**: React 19, Tailwind CSS 4
 - **Состояние**: Zustand
 - **Хранилище**: Файловое JSON + векторные эмбеддинги + LLM Wiki (markdown)
-- **Тестирование**: Vitest (48 тестов wiki-модуля)
+- **Тестирование**: Vitest (тесты wiki-модуля)
 - **Контейнеры**: Docker с multi-stage сборкой
 
 ## Структура проекта
@@ -380,6 +291,19 @@ docs/               # Дополнительная документация
 docker-compose.yml  # Контейнерный runtime
 Dockerfile          # Multi-stage production-сборка
 ```
+
+## Релизы
+
+- Архив релизов: [docs/releases/README.md](./docs/releases/README.md)
+- Последний upstream-релиз: [v0.1.5 — Web Fetch for Direct Links](./docs/releases/0.1.5-web-fetch-direct-links.md)
+
+## Участие и поддержка
+
+- Руководство для контрибьюторов: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Сообщить об ошибке: [Issues](https://github.com/eggent-ai/eggent/issues/new?template=bug_report.yml)
+- Предложить фичу: [Issues](https://github.com/eggent-ai/eggent/issues/new?template=feature_request.yml)
+- Кодекс поведения: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- Политика безопасности: [SECURITY.md](./SECURITY.md)
 
 ## Лицензия
 
