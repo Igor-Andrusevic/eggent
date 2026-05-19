@@ -946,7 +946,8 @@ export class CronScheduler {
       const nextWakeAtMs = await computeNextGlobalWakeAtMs(projectIds);
       const delay = nextWakeAtMs === null ? MAX_TIMER_DELAY_MS : Math.max(nextWakeAtMs - Date.now(), 0);
       this.arm(Math.min(delay, MAX_TIMER_DELAY_MS));
-    } catch {
+    } catch (error) {
+      console.error("CronScheduler tick error:", error);
       this.arm(MAX_TIMER_DELAY_MS);
     } finally {
       this.running = false;

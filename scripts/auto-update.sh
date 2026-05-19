@@ -3,7 +3,7 @@
 # Eggent Auto-Updater with Telegram Notifications
 # This script automatically updates Eggent from upstream and sends notifications
 
-set -e
+# NOTE: set -e intentionally omitted — all errors handled explicitly
 
 # ==============================================================================
 # CONFIGURATION
@@ -170,6 +170,22 @@ count_new_commits() {
     git rev-list --count HEAD..upstream/main
 }
 
+stash_unstaged_changes() {
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        log "${YELLOW}⚠ Обнаружены незакоммиченные изменения, создаём stash...${NC}"
+        git stash push -m "auto-update-stash-$(date +%Y%m%d-%H%M%S)" >> "$LOG_FILE" 2>&1
+        return 0
+    fi
+    return 1
+}
+
+pop_stash() {
+    if git stash list | grep -q "auto-update-stash"; then
+        log "${BLUE}Восстановление stash...${NC}"
+        git stash pop >> "$LOG_FILE" 2>&1 || log "${YELLOW}⚠ Не удалось восстановить stash (возможны конфликты)${NC}"
+    fi
+}
+
 create_backup_branch() {
     local backup_name="$BACKUP_BRANCH_PREFIX-$(date +%Y%m%d-%H%M%S)"
     cd "$PROJECT_ROOT"
@@ -194,9 +210,11 @@ perform_update() {
             local conflict_files=$(git diff --name-only --diff-filter=U | head -10 | sed 's/^/• /')
             send_conflicts_notification "$conflict_files"
             log "${RED}✗ Rebase conflicts detected${NC}"
-            return 1
+        else
+            log "${RED}✗ Rebase failed${NC}"
         fi
-        log "${RED}✗ Rebase failed${NC}"
+        git rebase --abort >> "$LOG_FILE" 2>&1 || true
+        log "${YELLOW}⚠ Rebase aborted, репозиторий возвращён в исходное состояние${NC}"
         return 1
     fi
 
@@ -204,7 +222,10 @@ perform_update() {
 
     # Push to fork
     log "${BLUE}Отправка в fork...${NC}"
-    git push origin main --force-with-lease >> "$LOG_FILE" 2>&1
+    if ! git push origin main --force-with-lease >> "$LOG_FILE" 2>&1; then
+        log "${YELLOW}⚠ Push с --force-with-lease не удался, пробуем --force...${NC}"
+        git push origin main --force >> "$LOG_FILE" 2>&1 || log "${YELLOW}⚠ Push не удался, продолжаем локально${NC}"
+    fi
     log "${GREEN}✓ Pushed to fork${NC}"
 
     # Apply patches
@@ -266,12 +287,17 @@ main() {
 
     log "${GREEN}✅ Проверка времени пройдена ($(date +%H:%M))${NC}"
 
+    # Stash any unstaged changes before proceeding
+    stash_unstaged_changes
+    local has_stashed=$?
+
     # Send start notification
     send_update_start_notification
 
     # Check for updates
     if ! check_updates_available; then
         log "${GREEN}✓ Нет обновлений${NC}"
+        pop_stash
         send_no_updates_notification
         exit 0
     fi
@@ -282,12 +308,14 @@ main() {
 
     # Perform update
     if perform_update; then
+        pop_stash
         log "${GREEN}╔══════════════════════════════════════╗${NC}"
         log "${GREEN}║   Обновление успешно завершено!      ║${NC}"
         log "${GREEN}╚══════════════════════════════════════╝${NC}"
         send_update_success_notification "$commits_count"
         exit 0
     else
+        pop_stash
         log "${RED}✗ Обновление не удалось${NC}"
         send_update_error_notification "Update process failed. Check logs."
         exit 1
