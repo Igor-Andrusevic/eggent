@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const SETTINGS_DIR = path.join(DATA_DIR, "settings");

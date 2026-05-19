@@ -14,9 +14,9 @@ import {
 } from "@/lib/storage/telegram-update-store";
 import {
     consumeTelegramAccessCode,
-    normalizeTelegramUserId,
     type TelegramIntegrationRuntimeConfig,
 } from "@/lib/storage/telegram-integration-store";
+import { normalizeTelegramUserId } from "@/lib/utils/string";
 import { saveChatFile } from "@/lib/storage/chat-files-store";
 import { createChat, getChat } from "@/lib/storage/chat-store";
 import {
