@@ -171,12 +171,20 @@ count_new_commits() {
 }
 
 stash_unstaged_changes() {
-    if ! git diff --quiet || ! git diff --cached --quiet; then
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
         log "${YELLOW}⚠ Обнаружены незакоммиченные изменения, создаём stash...${NC}"
-        git stash push -m "auto-update-stash-$(date +%Y%m%d-%H%M%S)" >> "$LOG_FILE" 2>&1
+        git stash push --include-untracked -m "auto-update-stash-$(date +%Y%m%d-%H%M%S)" >> "$LOG_FILE" 2>&1
         return 0
     fi
     return 1
+}
+
+abort_lingering_rebase() {
+    if [ -d "$PROJECT_ROOT/.git/rebase-merge" ] || [ -d "$PROJECT_ROOT/.git/rebase-apply" ]; then
+        log "${YELLOW}⚠ Обнаружен незавершённый rebase, выполняем abort...${NC}"
+        git rebase --abort >> "$LOG_FILE" 2>&1 || true
+        log "${GREEN}✓ Rebase aborted${NC}"
+    fi
 }
 
 pop_stash() {
@@ -184,6 +192,14 @@ pop_stash() {
         log "${BLUE}Восстановление stash...${NC}"
         git stash pop >> "$LOG_FILE" 2>&1 || log "${YELLOW}⚠ Не удалось восстановить stash (возможны конфликты)${NC}"
     fi
+}
+
+cleanup_old_backup_branches() {
+    log "${BLUE}Очистка старых backup-веток...${NC}"
+    git branch | grep "$BACKUP_BRANCH_PREFIX" | while read -r branch; do
+        git branch -D "$branch" >> "$LOG_FILE" 2>&1 || true
+    done
+    log "${GREEN}✓ Backup-ветки очищены${NC}"
 }
 
 create_backup_branch() {
@@ -227,6 +243,9 @@ perform_update() {
         git push origin main --force >> "$LOG_FILE" 2>&1 || log "${YELLOW}⚠ Push не удался, продолжаем локально${NC}"
     fi
     log "${GREEN}✓ Pushed to fork${NC}"
+
+    # Cleanup old backup branches
+    cleanup_old_backup_branches
 
     # Apply patches
     log "${BLUE}Применение патчей...${NC}"
@@ -286,6 +305,9 @@ main() {
     fi
 
     log "${GREEN}✅ Проверка времени пройдена ($(date +%H:%M))${NC}"
+
+    # Abort any lingering rebase from previous failed run
+    abort_lingering_rebase
 
     # Stash any unstaged changes before proceeding
     stash_unstaged_changes
