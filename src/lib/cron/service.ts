@@ -1,6 +1,8 @@
 import { createChat, getChat } from "@/lib/storage/chat-store";
 import { getAllProjects, getProject } from "@/lib/storage/project-store";
 import { getTelegramIntegrationRuntimeConfig } from "@/lib/storage/telegram-integration-store";
+import { getSettings } from "@/lib/storage/settings-store";
+import { MODEL_PROVIDERS } from "@/lib/providers/model-config";
 import { runAgentText } from "@/lib/agent/agent";
 import { parseAbsoluteTimeMs } from "@/lib/cron/parse";
 import { formatTelegramReply } from "@/lib/utils/telegram-format";
@@ -17,6 +19,7 @@ import type {
   CronSchedule,
   CronStoreFile,
 } from "@/lib/cron/types";
+import type { ModelConfig } from "@/lib/types";
 
 const STUCK_RUN_MS = 2 * 60 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 60_000;
@@ -513,6 +516,61 @@ async function finalizeJobRun(projectIdRaw: string, jobId: string, result: RunRe
   }
 }
 
+function isModelError(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes("401") || lower.includes("403") ||
+    lower.includes("429") || lower.includes("rate limit") ||
+    lower.includes("insufficient_quota") || lower.includes("billing") ||
+    lower.includes("invalid_api_key") || lower.includes("incorrect api key") ||
+    lower.includes("model_not_found") || lower.includes("does not exist") ||
+    lower.includes("not available") || lower.includes("timed out") ||
+    lower.includes("service unavailable") || lower.includes("overloaded")
+  );
+}
+
+async function buildFallbackModels(excludeProvider: string): Promise<ModelConfig[]> {
+  const settings = await getSettings();
+  const models: ModelConfig[] = [];
+
+  const envKeys: Record<string, string | undefined> = {
+    openai: process.env.OPENAI_API_KEY,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+    google: process.env.GOOGLE_API_KEY,
+    deepseek: process.env.DEEPSEEK_API_KEY,
+    openrouter: process.env.OPENROUTER_API_KEY,
+    zhipuai: process.env.ZHIPUAI_API_KEY,
+  };
+
+  const priorityOrder = ["google", "deepseek", "openai", "anthropic", "openrouter", "zhipuai"];
+
+  for (const provider of priorityOrder) {
+    if (provider === excludeProvider) continue;
+
+    const providerConfig = MODEL_PROVIDERS[provider];
+    if (!providerConfig?.models?.length) continue;
+
+    const envKey = envKeys[provider];
+    const settingsKey =
+      settings.chatModel.provider === provider ? settings.chatModel.apiKey : "";
+    const hasKey = Boolean((envKey?.trim()) || settingsKey?.trim());
+    if (!providerConfig.requiresApiKey || hasKey) {
+      const model = providerConfig.models[0];
+      if (model) {
+        models.push({
+          provider: provider as ModelConfig["provider"],
+          model: model.id,
+          authMethod: providerConfig.defaultAuthMethod ?? "api_key",
+          temperature: settings.chatModel.temperature,
+          maxTokens: settings.chatModel.maxTokens,
+        });
+      }
+    }
+  }
+
+  return models;
+}
+
 async function executeCronJob(job: CronJob): Promise<RunResult> {
   const startedAt = Date.now();
   if (job.payload.kind !== "agentTurn") {
@@ -685,9 +743,69 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
       endedAt: Date.now(),
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    const hasExplicitModel = Boolean(job.payload.model?.provider);
+    if (!hasExplicitModel && isModelError(errorMessage)) {
+      const failedProvider = job.payload.model?.provider ?? "";
+      const fallbackModels = await buildFallbackModels(failedProvider);
+
+      for (const fallbackModel of fallbackModels) {
+        console.warn(
+          `[Cron] Job "${job.name}" failed with model error, retrying with ${fallbackModel.provider}/${fallbackModel.model}`
+        );
+        try {
+          const retryRunPromise = runAgentText({
+            chatId,
+            userMessage: job.payload.message,
+            projectId,
+            currentPath: job.payload.currentPath,
+            modelOverride: fallbackModel,
+            runtimeData:
+              telegramChatId && telegramBotToken
+                ? {
+                    telegram: {
+                      botToken: telegramBotToken,
+                      chatId: telegramChatId,
+                    },
+                  }
+                : undefined,
+          });
+          const retryOutput =
+            typeof timeoutMs === "number"
+              ? await Promise.race([
+                  retryRunPromise,
+                  new Promise<string>((_, reject) => {
+                    setTimeout(
+                      () => reject(new Error("Cron job execution timed out.")),
+                      timeoutMs
+                    );
+                  }),
+                ])
+              : await retryRunPromise;
+
+          const retrySummary = retryOutput.trim();
+          return await deliverToTelegram({
+            status: retrySummary ? "ok" : "skipped",
+            summary: retrySummary
+              ? `[via ${fallbackModel.provider}/${fallbackModel.model}]\n${retrySummary}`
+              : undefined,
+            startedAt,
+            endedAt: Date.now(),
+          });
+        } catch (retryError) {
+          console.warn(
+            `[Cron] Fallback ${fallbackModel.provider}/${fallbackModel.model} also failed:`,
+            retryError instanceof Error ? retryError.message : String(retryError)
+          );
+          continue;
+        }
+      }
+    }
+
     return await deliverToTelegram({
       status: "error",
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
       startedAt,
       endedAt: Date.now(),
     });

@@ -19,6 +19,12 @@ Rules:
   - `runs` to show execution history
   - `remove` to delete
 
+Model selection:
+- The system will automatically use the default AI model configured in settings.
+- You may specify `payload.model` to override the model for this job (e.g. `{ "provider": "deepseek", "model": "deepseek-v4-pro" }`).
+- If a job fails due to model unavailability, the system will automatically try alternative available providers (those with configured API keys). This fallback is transparent — no manual action needed.
+- Only set `payload.model` when you specifically need a different model than the default.
+
 Do not emulate scheduling with terminal `at`, `cron` shell files, or `time.sleep`.
 
 Examples:
