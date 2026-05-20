@@ -153,10 +153,26 @@ export async function buildSystemPrompt(options: {
     }
   }
 
-  // 4c. Wiki Index (if project has wiki pages)
+  // 4c. Wiki Index and Status
   if (options.projectId) {
     try {
       const wikiEntries = await readIndex(options.projectId);
+      
+      // Wiki status line — always visible even if empty
+      const categoryCounts = new Map<string, number>();
+      for (const entry of wikiEntries) {
+        categoryCounts.set(entry.category, (categoryCounts.get(entry.category) ?? 0) + 1);
+      }
+      const statusParts: string[] = [];
+      for (const [cat, count] of categoryCounts) {
+        statusParts.push(`${cat}: ${count}`);
+      }
+      const statusLine = wikiEntries.length > 0
+        ? `Wiki has **${wikiEntries.length} pages** (${statusParts.join(", ")}) — use smart_search to search all knowledge sources`
+        : "Wiki is **empty**. Upload documents to populate it, or use smart_search (falls back to RAG and memory).";
+      
+      parts.push(`\n## Wiki Status\n${statusLine}`);
+
       if (wikiEntries.length > 0) {
         const categories = new Map<string, typeof wikiEntries>();
         for (const entry of wikiEntries) {
@@ -164,14 +180,14 @@ export async function buildSystemPrompt(options: {
           list.push(entry);
           categories.set(entry.category, list);
         }
-        const wikiIndexParts: string[] = [`The project wiki has ${wikiEntries.length} pages. Use wiki_query to search, wiki_read_page to read full pages.`];
+        const wikiIndexParts: string[] = [];
         for (const [cat, entries] of categories) {
           wikiIndexParts.push(`\n**${cat}/** (${entries.length}):`);
-          for (const e of entries.slice(0, 20)) {
+          for (const e of entries.slice(0, 10)) {
             wikiIndexParts.push(`  - ${e.name}: ${e.summary}`);
           }
-          if (entries.length > 20) {
-            wikiIndexParts.push(`  - ...and ${entries.length - 20} more`);
+          if (entries.length > 10) {
+            wikiIndexParts.push(`  - ...and ${entries.length - 10} more`);
           }
         }
         parts.push(`\n## Wiki Index\n${wikiIndexParts.join("\n")}`);
@@ -301,9 +317,9 @@ function getDefaultSystemPrompt(): string {
 
 You are a helpful AI assistant with access to tools that allow you to:
 - Execute code (Python, Node.js, Shell commands)
+- Search all knowledge sources with smart_search (wiki + knowledge base + memory)
 - Save and retrieve information from persistent memory
 - Search the internet for current information
-- Query a knowledge base of documents
 - Delegate complex subtasks to subordinate agents
 
 ## Guidelines
@@ -311,7 +327,7 @@ You are a helpful AI assistant with access to tools that allow you to:
 1. **Be helpful and direct.** Answer the user's question or complete their task.
 2. **Use tools when needed.** If a task requires running code, searching, or remembering information, use the appropriate tool.
 3. **Think step by step.** For complex tasks, break them down and use tools iteratively.
-4. **Memory management.** Save important facts, preferences, and solutions to memory for future reference.
+4. **Smart search.** Use smart_search for all knowledge retrieval — it searches wiki, documents, and memory automatically.
 5. **Code execution.** When writing code, prefer Python for data processing and Node.js for web tasks. Always handle errors.
 6. **Respond clearly.** Use markdown formatting for readability. Include code blocks with language tags.
 

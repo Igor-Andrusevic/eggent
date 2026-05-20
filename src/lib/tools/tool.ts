@@ -18,6 +18,7 @@ import {
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
 import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
+import { smartSearch } from "@/lib/tools/smart-search";
 import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint, wikiGetStatus } from "@/lib/wiki/wiki-engine";
 import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
@@ -1223,7 +1224,7 @@ export async function createAgentTools(
 
     tools.memory_load = tool({
       description:
-        "Search persistent memory for relevant information. Use this to recall previously saved facts, solutions, or conversation context.",
+        "LEGACY: Search persistent memory only. Prefer smart_search which also searches wiki and knowledge base.",
       inputSchema: z.object({
         query: z
           .string()
@@ -1308,10 +1309,35 @@ export async function createAgentTools(
     },
   });
 
-  // Knowledge query tool
+  // Smart Search tool — primary unified search across wiki + knowledge + memory
+  tools.smart_search = tool({
+    description:
+      "Primary search tool for ALL knowledge retrieval. Automatically searches the compiled LLM wiki (cross-referenced entity/concept pages), raw document knowledge base (RAG), and persistent memory — then combines results. Use this INSTEAD of wiki_query, knowledge_query, or memory_load. One call, all sources.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .describe("Search query — natural language, concepts, topics, or exact text"),
+      limit: z
+        .number()
+        .default(5)
+        .describe("Maximum number of results to return"),
+    }),
+    execute: async ({ query, limit }) => {
+      return smartSearch(
+        query,
+        limit,
+        context.projectId,
+        context.memorySubdir,
+        context.knowledgeSubdirs,
+        settings
+      );
+    },
+  });
+
+  // Knowledge query tool (legacy — use smart_search instead)
   tools.knowledge_query = tool({
     description:
-      "Search the knowledge base (uploaded documents) for relevant information using semantic search. Use this when you need information from the project's documents.",
+      "LEGACY: Search raw documents (RAG) only. Prefer smart_search which also searches wiki and memory.",
     inputSchema: z.object({
       query: z
         .string()
@@ -1332,7 +1358,7 @@ export async function createAgentTools(
 
     tools.wiki_query = tool({
       description:
-        "Search the project wiki for compiled knowledge. The wiki contains summaries, entity pages, and concept pages extracted from uploaded documents. Use this BEFORE knowledge_query for conceptual questions.",
+        "LEGACY: Search wiki only. Prefer smart_search which also searches knowledge base and memory.",
       inputSchema: z.object({
         query: z
           .string()

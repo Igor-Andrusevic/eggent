@@ -6,7 +6,8 @@ import path from "path";
 export async function processWikiIngest(
   projectId: string,
   filename: string,
-  knowledgeDir: string
+  knowledgeDir: string,
+  chatId?: string
 ): Promise<void> {
   const settings = await getSettings();
   await ensureWikiStructure(projectId);
@@ -25,5 +26,34 @@ export async function processWikiIngest(
 
   if (result.errors.length > 0) {
     console.error(`[Wiki] Ingest errors for ${filename}:`, result.errors);
+  }
+
+  if (chatId && (result.createdPages.length > 0 || result.updatedPages.length > 0)) {
+    notifyChatAsync(chatId, filename, result.createdPages, result.updatedPages);
+  }
+}
+
+async function notifyChatAsync(
+  chatId: string,
+  filename: string,
+  created: string[],
+  updated: string[]
+): Promise<void> {
+  try {
+    const { getChat, saveChat } = await import("@/lib/storage/chat-store");
+    const chat = await getChat(chatId);
+    if (!chat) return;
+
+    const systemMessage = {
+      id: crypto.randomUUID(),
+      role: "system" as const,
+      content: `[Wiki] Processed **${filename}**: created ${created.length} page(s) (${created.join(", ") || "none"}), updated ${updated.length} page(s) (${updated.join(", ") || "none"}). Use smart_search to query.`,
+      createdAt: new Date().toISOString(),
+    };
+
+    chat.messages.push(systemMessage);
+    await saveChat(chat);
+  } catch {
+    // notification is non-critical
   }
 }

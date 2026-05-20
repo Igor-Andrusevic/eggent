@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
                     errors: result.errors.length
                 });
 
-                processWikiIngest(chat.projectId, safeFileName, knowledgeDir).catch((err) => {
+                processWikiIngest(chat.projectId, safeFileName, knowledgeDir, chatId).catch((err) => {
                     console.error("[Wiki] Background ingest failed:", err);
                 });
 

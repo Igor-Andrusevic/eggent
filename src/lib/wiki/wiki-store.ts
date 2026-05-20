@@ -3,6 +3,10 @@ import path from "path";
 import type { WikiPage, WikiPageCategory, WikiIndexEntry, WikiLogEntry } from "@/lib/wiki/types";
 import { upsertWikiEmbedding, deleteWikiEmbedding, clearEmbeddingsCache } from "@/lib/wiki/wiki-embeddings";
 
+const WIKI_SOURCE_META = "source";
+const WIKI_SOURCE_VALUE = "wiki";
+const WIKI_RAG_AREA = "wiki";
+
 const DATA_DIR = path.join(process.cwd(), "data");
 
 const WIKI_CATEGORIES: WikiPageCategory[] = ["sources", "entities", "concepts", "synthesis"];
@@ -237,6 +241,7 @@ export async function writePage(
 
   const pagePath = `${category}/${name}.md`;
   updateEmbeddingAsync(projectId, pagePath, content);
+  indexWikiPageToRagAsync(projectId, pagePath, content);
 
   return filePath;
 }
@@ -252,6 +257,7 @@ export async function deletePage(
     await fs.unlink(filePath);
     await removeIndexEntry(projectId, category, name);
     deleteWikiEmbedding(projectId, pagePath).catch(() => {});
+    removeWikiPageFromRagAsync(projectId, pagePath);
     return true;
   } catch {
     return false;
@@ -323,6 +329,8 @@ export async function deleteWiki(projectId: string): Promise<void> {
   clearEmbeddingsCache(projectId);
   try {
     await fs.rm(wikiDir, { recursive: true, force: true });
+    const { deleteMemoryByMetadata } = await import("@/lib/memory/memory");
+    await deleteMemoryByMetadata(WIKI_SOURCE_META, WIKI_SOURCE_VALUE, projectId);
   } catch {
     // ignore
   }
@@ -347,5 +355,35 @@ async function updateEmbeddingAsync(projectId: string, pagePath: string, content
     await upsertWikiEmbedding(projectId, pagePath, content, settings);
   } catch {
     // embedding update failure is non-critical
+  }
+}
+
+async function indexWikiPageToRagAsync(
+  memorySubdir: string,
+  pagePath: string,
+  content: string
+): Promise<void> {
+  try {
+    const { getSettings } = await import("@/lib/storage/settings-store");
+    const { insertMemory, deleteMemoryByMetadata } = await import("@/lib/memory/memory");
+    const settings = await getSettings();
+
+    await deleteMemoryByMetadata("wikiPath", pagePath, memorySubdir);
+
+    await insertMemory(content, WIKI_RAG_AREA, memorySubdir, settings, {
+      [WIKI_SOURCE_META]: WIKI_SOURCE_VALUE,
+      wikiPath: pagePath,
+    });
+  } catch {
+    // non-critical
+  }
+}
+
+async function removeWikiPageFromRagAsync(projectId: string, pagePath: string): Promise<void> {
+  try {
+    const { deleteMemoryByMetadata } = await import("@/lib/memory/memory");
+    await deleteMemoryByMetadata("wikiPath", pagePath, projectId);
+  } catch {
+    // non-critical
   }
 }
