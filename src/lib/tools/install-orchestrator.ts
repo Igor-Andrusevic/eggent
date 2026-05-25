@@ -70,6 +70,18 @@ export async function installPackages(params: InstallPackagesParams): Promise<In
     };
   }
 
+  const invalid = packages.filter((p) => !isValidPackageName(p));
+  if (invalid.length > 0) {
+    return {
+      success: false,
+      kind: params.kind,
+      resolvedKind: resolveAutoKind(params.kind, params.preferManager),
+      manager: null,
+      message: `Invalid package name(s): ${invalid.join(", ")}`,
+      attempts: [],
+    };
+  }
+
   const timeoutMs = clampTimeout(params.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const resolvedKind = resolveAutoKind(params.kind, params.preferManager);
   const attempts: InstallAttempt[] = [];
@@ -586,6 +598,10 @@ function uniqueNonEmpty(values: string[]): string[] {
 function normalizeManager(value?: string): string | undefined {
   const normalized = value?.trim().toLowerCase();
   return normalized || undefined;
+}
+
+function isValidPackageName(name: string): boolean {
+  return /^[a-zA-Z0-9@/._-]+$/.test(name) && !name.startsWith("-") && name.length > 0;
 }
 
 function formatCommand(argv: string[]): string {

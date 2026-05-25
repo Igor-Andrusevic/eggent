@@ -92,6 +92,7 @@ export async function saveSettings(
   const current = await getSettings();
   const merged = deepMerge(current as unknown as Record<string, unknown>, settings as unknown as Record<string, unknown>) as unknown as AppSettings;
   await fs.writeFile(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+  await fs.chmod(SETTINGS_FILE, 0o600).catch(() => {});
   return merged;
 }
 

@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+};
+
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
 function isPublicPage(pathname: string): boolean {
   return pathname === "/login";
 }
@@ -55,11 +70,12 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (shouldBypass(pathname)) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   if (pathname.startsWith("/api/") && isPublicApi(req, pathname)) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    return applySecurityHeaders(response);
   }
 
   const token = req.cookies.get(AUTH_COOKIE_NAME)?.value || "";
@@ -68,18 +84,19 @@ export async function middleware(req: NextRequest) {
   if (isPublicPage(pathname)) {
     if (session) {
       if (session.mustChangeCredentials) {
-        return buildCredentialsOnboardingRedirect(req);
+        return applySecurityHeaders(buildCredentialsOnboardingRedirect(req));
       }
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", req.url)));
     }
-    return NextResponse.next();
+    const response = NextResponse.next();
+    return applySecurityHeaders(response);
   }
 
   if (!session) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return applySecurityHeaders(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
     }
-    return buildLoginRedirect(req);
+    return applySecurityHeaders(buildLoginRedirect(req));
   }
 
   if (
@@ -87,7 +104,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/dashboard") &&
     pathname !== "/dashboard/projects"
   ) {
-    return buildCredentialsOnboardingRedirect(req);
+    return applySecurityHeaders(buildCredentialsOnboardingRedirect(req));
   }
 
   if (
@@ -95,10 +112,11 @@ export async function middleware(req: NextRequest) {
     pathname === "/dashboard/projects" &&
     req.nextUrl.searchParams.get("credentials") !== "1"
   ) {
-    return buildCredentialsOnboardingRedirect(req);
+    return applySecurityHeaders(buildCredentialsOnboardingRedirect(req));
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  return applySecurityHeaders(response);
 }
 
 export const config = {

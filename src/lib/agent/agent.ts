@@ -746,6 +746,8 @@ function convertModelMessageToChatMessages(msg: ModelMessage, now: string): Chat
   }];
 }
 
+const ENABLE_VERBOSE_LOGGING = process.env.EGGENT_VERBOSE_LOG === "true";
+
 function logLLMRequest(options: {
   model: string;
   system: string;
@@ -755,6 +757,7 @@ function logLLMRequest(options: {
   maxTokens?: number;
   label?: string;
 }) {
+  if (!ENABLE_VERBOSE_LOGGING) return;
   const { model, system, messages, toolNames, temperature, maxTokens, label = "LLM Request" } = options;
   console.log(`\n${LLM_LOG_BORDER}`);
   console.log(`  ${label}`);

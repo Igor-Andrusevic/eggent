@@ -196,7 +196,8 @@ function scoreContent(
   }
 
   for (const word of queryWords) {
-    const regex = new RegExp(word, "gi");
+    const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escapedWord, "gi");
     const matches = contentLower.match(regex);
     if (matches) {
       score += Math.min(matches.length * 0.05, 0.2);
