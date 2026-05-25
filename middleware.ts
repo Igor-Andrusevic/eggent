@@ -25,6 +25,7 @@ function isPublicApi(req: NextRequest, pathname: string): boolean {
   if (pathname === "/api/auth/login") return true;
   if (pathname === "/api/auth/logout") return true;
   if (pathname === "/api/auth/status") return true;
+  if (pathname === "/api/chat") return true;
   if (pathname.startsWith("/api/external/") && req.headers.get("authorization")) {
     return true;
   }

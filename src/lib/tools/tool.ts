@@ -17,6 +17,16 @@ import {
 } from "@/lib/tools/code-execution";
 import { memorySave, memoryLoad, memoryDelete } from "@/lib/tools/memory-tools";
 import { createNotionPage, searchNotionPages } from "@/lib/tools/notion-tool";
+import {
+  gmailListEmails,
+  gmailReadEmail,
+  gmailSendEmail,
+  gmailManageLabels,
+  calendarListEvents,
+  calendarCreateEvent,
+  calendarUpdateEvent,
+  calendarDeleteEvent,
+} from "@/lib/tools/google-workspace-tools";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
 import { smartSearch } from "@/lib/tools/smart-search";
 import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint, wikiGetStatus } from "@/lib/wiki/wiki-engine";
@@ -1308,6 +1318,156 @@ export async function createAgentTools(
       });
     },
   });
+
+  // Google Workspace tools
+  if (settings.googleWorkspace?.enabled) {
+    if (settings.googleWorkspace.gmailEnabled) {
+      tools.gmail_send_email = tool({
+        description:
+          "Send an email via Gmail. Use to compose and send messages, reply to threads.",
+        inputSchema: z.object({
+          to: z.string().describe("Recipient email address"),
+          subject: z.string().describe("Email subject line"),
+          body: z.string().describe("Email body text"),
+          reply_to_message_id: z
+            .string()
+            .optional()
+            .describe("Optional Gmail message ID to reply to (maintains thread)"),
+        }),
+        execute: async ({ to, subject, body, reply_to_message_id }) => {
+          return gmailSendEmail(to, subject, body, reply_to_message_id);
+        },
+      });
+
+      tools.gmail_list_emails = tool({
+        description:
+          "Search and list Gmail messages using Gmail query syntax. Supports filters like is:unread, from:, subject:, has:attachment, newer_than:Nd. Returns message IDs for reading full content.",
+        inputSchema: z.object({
+          query: z
+            .string()
+            .default("is:unread")
+            .describe("Gmail search query (e.g., 'is:unread', 'from:boss@company.com', 'subject:meeting')"),
+          max_results: z
+            .number()
+            .default(10)
+            .describe("Maximum number of emails to return"),
+        }),
+        execute: async ({ query, max_results }) => {
+          return gmailListEmails(query, max_results);
+        },
+      });
+
+      tools.gmail_read_email = tool({
+        description:
+          "Read the full content of a specific Gmail message by ID. Use after gmail_list_emails to read individual emails in detail.",
+        inputSchema: z.object({
+          message_id: z.string().describe("Gmail message ID from gmail_list_emails results"),
+        }),
+        execute: async ({ message_id }) => {
+          return gmailReadEmail(message_id);
+        },
+      });
+
+      tools.gmail_manage_labels = tool({
+        description:
+          "Manage Gmail labels on messages. Use to mark as read/unread, archive, star, or apply custom labels. Common labels: UNREAD, STARRED, IMPORTANT, INBOX, SPAM, TRASH.",
+        inputSchema: z.object({
+          action: z
+            .enum(["list", "add", "remove"])
+            .describe("Action: 'list' all labels, 'add' labels to a message, or 'remove' labels"),
+          message_id: z
+            .string()
+            .optional()
+            .describe("Gmail message ID (required for add/remove)"),
+          labels: z
+            .array(z.string())
+            .optional()
+            .describe("Labels to add/remove (e.g., ['UNREAD'], ['STARRED'])"),
+        }),
+        execute: async ({ action, message_id, labels }) => {
+          return gmailManageLabels(action, message_id, labels);
+        },
+      });
+    }
+
+    if (settings.googleWorkspace.calendarEnabled) {
+      tools.calendar_list_events = tool({
+        description:
+          "List events from Google Calendar within a date range. Default shows next 7 days. Returns event IDs, summaries, times, locations, and attendees.",
+        inputSchema: z.object({
+          time_min: z
+            .string()
+            .optional()
+            .describe("Start of range ISO 8601 (default: now)"),
+          time_max: z
+            .string()
+            .optional()
+            .describe("End of range ISO 8601 (default: 7 days from now)"),
+          max_results: z
+            .number()
+            .default(20)
+            .describe("Maximum events to return"),
+        }),
+        execute: async ({ time_min, time_max, max_results }) => {
+          return calendarListEvents(time_min, time_max, max_results);
+        },
+      });
+
+      tools.calendar_create_event = tool({
+        description:
+          "Create a new event in Google Calendar. Supports timed events (ISO 8601) and all-day events (YYYY-MM-DD). Optionally add description, location, and attendees.",
+        inputSchema: z.object({
+          summary: z.string().describe("Event title"),
+          start: z
+            .string()
+            .describe("Start time ISO 8601 or date YYYY-MM-DD for all-day"),
+          end: z
+            .string()
+            .describe("End time ISO 8601 or date YYYY-MM-DD for all-day"),
+          description: z.string().optional().describe("Event description"),
+          location: z.string().optional().describe("Location or video call URL"),
+          attendees: z
+            .array(z.string())
+            .optional()
+            .describe("List of attendee email addresses"),
+        }),
+        execute: async ({ summary, start, end, description, location, attendees }) => {
+          return calendarCreateEvent(summary, start, end, description, location, attendees);
+        },
+      });
+
+      tools.calendar_update_event = tool({
+        description:
+          "Update an existing Google Calendar event. Only include fields that need to change. First use calendar_list_events to find the event ID.",
+        inputSchema: z.object({
+          event_id: z.string().describe("ID of event to update"),
+          summary: z.string().optional().describe("New title"),
+          start: z.string().optional().describe("New start time"),
+          end: z.string().optional().describe("New end time"),
+          description: z.string().optional().describe("New description"),
+          location: z.string().optional().describe("New location"),
+          attendees: z
+            .array(z.string())
+            .optional()
+            .describe("New attendee list"),
+        }),
+        execute: async ({ event_id, summary, start, end, description, location, attendees }) => {
+          return calendarUpdateEvent(event_id, summary, start, end, description, location, attendees);
+        },
+      });
+
+      tools.calendar_delete_event = tool({
+        description:
+          "Delete an event from Google Calendar. First use calendar_list_events to find the event ID. Always confirm with user before deleting.",
+        inputSchema: z.object({
+          event_id: z.string().describe("ID of event to delete"),
+        }),
+        execute: async ({ event_id }) => {
+          return calendarDeleteEvent(event_id);
+        },
+      });
+    }
+  }
 
   // Smart Search tool — primary unified search across wiki + knowledge + memory
   tools.smart_search = tool({

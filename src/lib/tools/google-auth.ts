@@ -36,8 +36,8 @@ async function ensureDir(dir: string): Promise<void> {
 
 async function getOAuthConfig(): Promise<{ clientId: string; clientSecret: string; redirectUri: string } | null> {
   const settings = await getSettings();
-  const clientId = settings.googleWorkspace.clientId?.trim();
-  const clientSecret = settings.googleWorkspace.clientSecret?.trim();
+  const clientId = settings.googleWorkspace?.clientId?.trim();
+  const clientSecret = settings.googleWorkspace?.clientSecret?.trim();
   
   if (!clientId || !clientSecret) {
     return null;
