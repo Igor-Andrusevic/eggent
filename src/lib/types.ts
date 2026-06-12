@@ -72,6 +72,7 @@ export interface AppSettings {
     mustChangeCredentials: boolean;
   };
   googleWorkspace?: GoogleWorkspaceSettings;
+  apiKeysByProvider?: Record<string, string>;
 }
 
 // --- Chat ---

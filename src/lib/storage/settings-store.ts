@@ -65,6 +65,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     gmailEnabled: true,
     calendarEnabled: true,
   },
+  apiKeysByProvider: {},
 };
 
 export async function getSettings(): Promise<AppSettings> {
@@ -75,13 +76,30 @@ export async function getSettings(): Promise<AppSettings> {
     if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
       return structuredClone(DEFAULT_SETTINGS);
     }
-    // Deep merge with defaults to handle new nested fields.
-    return deepMerge(
+    const merged = deepMerge(
       structuredClone(DEFAULT_SETTINGS) as unknown as Record<string, unknown>,
       saved as Record<string, unknown>
     ) as unknown as AppSettings;
+    syncApiKeysToProviderMap(merged);
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    return merged;
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
+  }
+}
+
+function syncApiKeysToProviderMap(settings: AppSettings): void {
+  if (!settings.apiKeysByProvider) {
+    settings.apiKeysByProvider = {};
+  }
+  if (settings.chatModel.apiKey) {
+    settings.apiKeysByProvider[settings.chatModel.provider] = settings.chatModel.apiKey;
+  }
+  if (settings.embeddingsModel.apiKey) {
+    settings.apiKeysByProvider[settings.embeddingsModel.provider] = settings.embeddingsModel.apiKey;
+  }
+  if (settings.search.apiKey) {
+    settings.apiKeysByProvider[`search_${settings.search.provider}`] = settings.search.apiKey;
   }
 }
 
@@ -91,6 +109,7 @@ export async function saveSettings(
   await ensureDir(SETTINGS_DIR);
   const current = await getSettings();
   const merged = deepMerge(current as unknown as Record<string, unknown>, settings as unknown as Record<string, unknown>) as unknown as AppSettings;
+  syncApiKeysToProviderMap(merged);
   await fs.writeFile(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
   await fs.chmod(SETTINGS_FILE, 0o600).catch(() => {});
   return merged;

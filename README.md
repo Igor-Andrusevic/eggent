@@ -18,8 +18,9 @@ Eggent — локальная AI-платформа для создания ко
 - **Cron-автоматизация** — повторяющиеся задачи с выбором модели и fallback на альтернативных провайдерах при ошибках
 - **Интеграция Telegram** — общение с агентами из Telegram, автоимпорт файлов, транскрибирование голосовых, HTML-форматирование ответов
 - **Интеграция MCP** — подключение внешних инструментов через Model Context Protocol
+- **Jina Reader** — AI-дружественное чтение веб-страниц в Markdown, поиск по интернету с контентом результатов, JS-рендеринг SPA
 - **Веб-поиск и чтение страниц** — поиск через Tavily + инструмент `web_fetch` для прямых ссылок
-- **37 встроенных навыков** — Bitrix24, SendforSign, NotebookLM, мониторинг серверов, YouTube-поиск и др.
+- **38 встроенных навыков** — Bitrix24, SendforSign, NotebookLM, мониторинг серверов, YouTube-поиск и др.
 
 ## Поддерживаемые AI-провайдеры
 
@@ -66,6 +67,27 @@ Eggent — локальная AI-платформа для создания ко
 - **Wiki → RAG индексация** — wiki-страницы автоматически индексируются в векторную базу при создании/обновлении; `knowledge_query` находит wiki-контент наравне с сырыми документами
 - **Wiki-статус в промпте** — агент всегда видит количество страниц по категориям (даже при пустой wiki)
 - **Уведомления об инжесте** — после загрузки файла в чат приходит сообщение о созданных/обновлённых wiki-страницах
+
+### Jina Reader
+
+Интеграция [Jina Reader API](https://jina.ai/reader) для извлечения контента из веб-страниц в Markdown — идеально для grounding LLM:
+
+- **`jina_fetch`** — чтение любой страницы в чистый Markdown (включая SPA через `X-Engine: browser`)
+- **`jina_search`** — поиск + чтение контента топ-результатов (глубже обычного search_web)
+- **CLI** — `python3 scripts/jina_reader.py read <url>`, `search <query>`, `research <url>`, `save <url>`
+- **Пресеты** — `research`, `summary`, чанкование по H2/H3, лимит токенов
+- **Скилл** — `bundled-skills/jina-reader/SKILL.md` с полной документацией и рецептами
+
+```bash
+# Чтение страницы
+python3 scripts/jina_reader.py read https://habr.com/ru/news/ --no-cache
+
+# Поиск + чтение
+python3 scripts/jina_reader.py search "DeepSeek V4 API features"
+
+# Режим исследования
+python3 scripts/jina_reader.py research https://arxiv.org/abs/2305.10688
+```
 
 ### Встроенные навыки
 - **NotebookLM** — генерация подкастов
@@ -170,6 +192,7 @@ DEEPSEEK_API_KEY=sk-...              # DeepSeek V4 Flash/Pro
 ZHIPUAI_API_KEY=...                  # GLM-5.1
 OPENROUTER_API_KEY=...
 TAVILY_API_KEY=...                   # Веб-поиск
+JINA_API_KEY=jina_...                # Jina Reader (Markdown-чтение страниц)
 
 # Telegram интеграция
 TELEGRAM_BOT_TOKEN=your_bot_token

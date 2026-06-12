@@ -45,6 +45,13 @@ function maskSettingsKeys(settings: AppSettings): AppSettings {
   if (masked.googleWorkspace?.clientSecret) {
     masked.googleWorkspace.clientSecret = maskKey(masked.googleWorkspace.clientSecret);
   }
+  if (masked.apiKeysByProvider) {
+    const maskedMap: Record<string, string> = {};
+    for (const [provider, key] of Object.entries(masked.apiKeysByProvider)) {
+      maskedMap[provider] = key ? maskKey(key) : key;
+    }
+    masked.apiKeysByProvider = maskedMap;
+  }
 
   return masked;
 }
@@ -56,23 +63,29 @@ function restoreMaskedKeys(
   const next: Partial<AppSettings> = structuredClone(incoming);
 
   if (isMaskedKey(next.chatModel?.apiKey)) {
+    const provider = next.chatModel?.provider || current.chatModel.provider;
+    const byProvider = current.apiKeysByProvider?.[provider];
     next.chatModel = {
       ...(next.chatModel || {}),
-      apiKey: current.chatModel.apiKey,
+      apiKey: byProvider || current.chatModel.apiKey,
     };
   }
 
   if (isMaskedKey(next.embeddingsModel?.apiKey)) {
+    const provider = next.embeddingsModel?.provider || current.embeddingsModel.provider;
+    const byProvider = current.apiKeysByProvider?.[provider];
     next.embeddingsModel = {
       ...(next.embeddingsModel || {}),
-      apiKey: current.embeddingsModel.apiKey,
+      apiKey: byProvider || current.embeddingsModel.apiKey,
     };
   }
 
   if (isMaskedKey(next.search?.apiKey)) {
+    const provider = next.search?.provider || current.search.provider;
+    const byProvider = current.apiKeysByProvider?.[`search_${provider}`];
     next.search = {
       ...(next.search || {}),
-      apiKey: current.search.apiKey,
+      apiKey: byProvider || current.search.apiKey,
     };
   }
   if (isMaskedKey(next.auth?.passwordHash)) {
@@ -87,6 +100,16 @@ function restoreMaskedKeys(
       ...(next.googleWorkspace || {}),
       clientSecret: current.googleWorkspace?.clientSecret || "",
     };
+  }
+
+  if (next.apiKeysByProvider) {
+    const restoredMap: Record<string, string> = { ...next.apiKeysByProvider };
+    for (const [provider, key] of Object.entries(restoredMap)) {
+      if (isMaskedKey(key) && current.apiKeysByProvider?.[provider]) {
+        restoredMap[provider] = current.apiKeysByProvider[provider];
+      }
+    }
+    next.apiKeysByProvider = restoredMap;
   }
 
   return next;

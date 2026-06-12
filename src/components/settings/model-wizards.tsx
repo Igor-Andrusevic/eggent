@@ -360,6 +360,13 @@ export function ChatModelWizard({
               (nextProviderConfig?.requiresApiKey ?? true);
             if (!nextRequiresApiKey) {
               updateSettings("chatModel.apiKey", "");
+            } else {
+              const savedKey = settings.apiKeysByProvider?.[nextProvider];
+              if (savedKey) {
+                updateSettings("chatModel.apiKey", savedKey);
+              } else {
+                updateSettings("chatModel.apiKey", "");
+              }
             }
 
             setConnectionStatus(null);
@@ -422,7 +429,18 @@ export function ChatModelWizard({
             <Input
               type="password"
               value={apiKey}
-              onChange={(event) => updateSettings("chatModel.apiKey", event.target.value)}
+              onChange={(event) => {
+                const newKey = event.target.value;
+                updateSettings("chatModel.apiKey", newKey);
+                const currentProvider = settings.chatModel.provider;
+                if (currentProvider && newKey) {
+                  const currentMap = settings.apiKeysByProvider || {};
+                  updateSettings("apiKeysByProvider", {
+                    ...currentMap,
+                    [currentProvider]: newKey,
+                  });
+                }
+              }}
               placeholder={
                 providerConfig?.envKey
                   ? `Enter key or set ${providerConfig.envKey} in .env`
@@ -704,8 +722,17 @@ export function EmbeddingsModelWizard({
               updateSettings("embeddingsModel.apiKey", "");
             } else if (nextProvider === "custom") {
               updateSettings("embeddingsModel.baseUrl", "http://localhost:1234/v1");
+              const savedKey = settings.apiKeysByProvider?.[nextProvider];
+              updateSettings("embeddingsModel.apiKey", savedKey || "");
             } else {
               updateSettings("embeddingsModel.baseUrl", "");
+              const nextRequiresApiKey = embeddingProviders[nextProvider]?.requiresApiKey;
+              if (nextRequiresApiKey) {
+                const savedKey = settings.apiKeysByProvider?.[nextProvider];
+                updateSettings("embeddingsModel.apiKey", savedKey || "");
+              } else {
+                updateSettings("embeddingsModel.apiKey", "");
+              }
             }
           }}
           className="w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -730,9 +757,18 @@ export function EmbeddingsModelWizard({
         <Input
           type="password"
           value={apiKey}
-          onChange={(event) =>
-            updateSettings("embeddingsModel.apiKey", event.target.value)
-          }
+          onChange={(event) => {
+            const newKey = event.target.value;
+            updateSettings("embeddingsModel.apiKey", newKey);
+            const currentProvider = settings.embeddingsModel.provider;
+            if (currentProvider && newKey) {
+              const currentMap = settings.apiKeysByProvider || {};
+              updateSettings("apiKeysByProvider", {
+                ...currentMap,
+                [currentProvider]: newKey,
+              });
+            }
+          }}
           placeholder={
             providerConfig.envKey
               ? `Enter key or set ${providerConfig.envKey} in .env`

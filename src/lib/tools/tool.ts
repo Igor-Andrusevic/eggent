@@ -31,6 +31,7 @@ import { knowledgeQuery } from "@/lib/tools/knowledge-query";
 import { smartSearch } from "@/lib/tools/smart-search";
 import { wikiQuery, wikiReadPage, wikiCreatePage, wikiIngestFile, wikiLint, wikiGetStatus } from "@/lib/wiki/wiki-engine";
 import { fetchWebPage, searchWeb } from "@/lib/tools/search-engine";
+import { jinaFetchPage, jinaSearchWeb, isJinaAvailable } from "@/lib/tools/jina-reader";
 import { callSubordinate } from "@/lib/tools/call-subordinate";
 import { createCronTool } from "@/lib/tools/cron-tool";
 import { installPackages } from "@/lib/tools/install-orchestrator";
@@ -1631,6 +1632,39 @@ export async function createAgentTools(
       }),
       execute: async ({ url }) => {
         return fetchWebPage(url);
+      },
+    });
+  }
+
+  if (isJinaAvailable()) {
+    tools.jina_fetch = tool({
+      description:
+        "Fetch and read ANY web page as clean Markdown using Jina Reader. Handles JavaScript-heavy pages, PDFs, and complex sites. Use instead of web_fetch when you need high-quality content extraction, especially for JS-rendered pages.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .describe("Absolute http(s) URL to fetch and convert to Markdown"),
+      }),
+      execute: async ({ url }) => {
+        return jinaFetchPage(url);
+      },
+    });
+
+    tools.jina_search = tool({
+      description:
+        "Search the internet AND read the results using Jina Reader. Returns both search results and content from top pages. Use for deep research when you need not just titles but actual page content.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .describe("Search query in natural language"),
+        limit: z
+          .number()
+          .optional()
+          .default(5)
+          .describe("Maximum number of results (1-10)"),
+      }),
+      execute: async ({ query, limit }) => {
+        return jinaSearchWeb(query, limit);
       },
     });
   }
