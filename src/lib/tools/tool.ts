@@ -1601,72 +1601,86 @@ export async function createAgentTools(
     });
   }
 
-  // Search engine tool
-  if (settings.search.enabled && settings.search.provider !== "none") {
-    tools.search_web = tool({
-      description:
-        "Search the internet for current information. Use this for broad discovery and multiple sources. For a specific URL, use web_fetch.",
-      inputSchema: z.object({
-        query: z
-          .string()
-          .describe("The search query (not a direct URL)"),
-        limit: z
-          .number()
-          .default(5)
-          .describe("Maximum number of search results"),
-      }),
-      execute: async ({ query, limit }) => {
-        return searchWeb(query, limit, settings.search);
-      },
-    });
-  }
-
-  if (settings.search.enabled) {
-    tools.web_fetch = tool({
-      description:
-        "Fetch and read content from a specific web page URL. Use this when the user gives a direct link.",
-      inputSchema: z.object({
-        url: z
-          .string()
-          .describe("Absolute http(s) URL to fetch, for example https://example.com/article"),
-      }),
-      execute: async ({ url }) => {
-        return fetchWebPage(url);
-      },
-    });
-  }
-
+  // Search engine tool — Jina Reader preferred, fallback to built-in
   if (isJinaAvailable()) {
-    tools.jina_fetch = tool({
-      description:
-        "Fetch and read ANY web page as clean Markdown using Jina Reader. Handles JavaScript-heavy pages, PDFs, and complex sites. Use instead of web_fetch when you need high-quality content extraction, especially for JS-rendered pages.",
-      inputSchema: z.object({
-        url: z
-          .string()
-          .describe("Absolute http(s) URL to fetch and convert to Markdown"),
-      }),
-      execute: async ({ url }) => {
-        return jinaFetchPage(url);
-      },
-    });
+    if (settings.search.enabled && settings.search.provider !== "none") {
+      tools.jina_search = tool({
+        description:
+          "Search the internet AND read the results using Jina Reader. Returns both search results and full page content. Falls back to regular search if Jina is unavailable.",
+        inputSchema: z.object({
+          query: z
+            .string()
+            .describe("Search query in natural language"),
+          limit: z
+            .number()
+            .optional()
+            .default(5)
+            .describe("Maximum number of results (1-10)"),
+        }),
+        execute: async ({ query, limit }) => {
+          const jinaResult = await jinaSearchWeb(query, limit);
+          if (jinaResult.startsWith("Jina search error:") || jinaResult.startsWith("Jina search timed out")) {
+            console.log("[tool] Jina search failed, falling back to built-in search");
+            return searchWeb(query, limit, settings.search);
+          }
+          return jinaResult;
+        },
+      });
+    }
 
-    tools.jina_search = tool({
-      description:
-        "Search the internet AND read the results using Jina Reader. Returns both search results and content from top pages. Use for deep research when you need not just titles but actual page content.",
-      inputSchema: z.object({
-        query: z
-          .string()
-          .describe("Search query in natural language"),
-        limit: z
-          .number()
-          .optional()
-          .default(5)
-          .describe("Maximum number of results (1-10)"),
-      }),
-      execute: async ({ query, limit }) => {
-        return jinaSearchWeb(query, limit);
-      },
-    });
+    if (settings.search.enabled) {
+      tools.jina_fetch = tool({
+        description:
+          "Fetch and read a web page as clean Markdown using Jina Reader. Handles JavaScript-heavy pages, PDFs, and complex sites. Falls back to built-in fetcher if Jina fails.",
+        inputSchema: z.object({
+          url: z
+            .string()
+            .describe("Absolute http(s) URL to fetch and convert to Markdown"),
+        }),
+        execute: async ({ url }) => {
+          const jinaResult = await jinaFetchPage(url);
+          if (jinaResult.startsWith("Jina fetch error:") || jinaResult.startsWith("Jina fetch timed out")) {
+            console.log("[tool] Jina fetch failed, falling back to built-in fetcher");
+            return fetchWebPage(url);
+          }
+          return jinaResult;
+        },
+      });
+    }
+  } else {
+    if (settings.search.enabled && settings.search.provider !== "none") {
+      tools.search_web = tool({
+        description:
+          "Search the internet for current information. Use this for broad discovery and multiple sources. For a specific URL, use web_fetch.",
+        inputSchema: z.object({
+          query: z
+            .string()
+            .describe("The search query (not a direct URL)"),
+          limit: z
+            .number()
+            .default(5)
+            .describe("Maximum number of search results"),
+        }),
+        execute: async ({ query, limit }) => {
+          return searchWeb(query, limit, settings.search);
+        },
+      });
+    }
+
+    if (settings.search.enabled) {
+      tools.web_fetch = tool({
+        description:
+          "Fetch and read content from a specific web page URL. Use this when the user gives a direct link.",
+        inputSchema: z.object({
+          url: z
+            .string()
+            .describe("Absolute http(s) URL to fetch, for example https://example.com/article"),
+        }),
+        execute: async ({ url }) => {
+          return fetchWebPage(url);
+        },
+      });
+    }
   }
 
   const telegramRuntime = getTelegramRuntimeData(context);
