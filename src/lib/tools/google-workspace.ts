@@ -1,4 +1,4 @@
-import { gmail_v1, calendar_v3 } from "googleapis";
+import { gmail_v1, calendar_v3, tasks_v1, google } from "googleapis";
 import { ensureAuthenticatedClient } from "@/lib/tools/google-auth";
 
 // ============================================================
@@ -490,6 +490,212 @@ export async function calendarDeleteEvent(
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to delete event",
+    };
+  }
+}
+
+// ============================================================
+// Google Tasks Functions
+// ============================================================
+
+export interface TaskList {
+  id: string;
+  title: string;
+  updated: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  notes?: string;
+  due?: string;
+  status: string;
+  completed?: string;
+  updated: string;
+  parent?: string;
+  position: string;
+}
+
+async function getTasksClient(): Promise<tasks_v1.Tasks> {
+  const auth = await ensureAuthenticatedClient();
+  const tasks = google.tasks({ version: "v1", auth });
+  return tasks;
+}
+
+function resolveTaskListId(
+  taskListId: string | undefined,
+  lists: tasks_v1.Schema$TaskList[],
+): string {
+  if (taskListId && taskListId !== "@default") {
+    return taskListId;
+  }
+
+  const defaultList = lists.find(
+    (tl) => tl.title === "My Tasks" || tl.title === "Мои задачи" || tl.title === "Мой список задач",
+  );
+
+  if (defaultList?.id) {
+    return defaultList.id;
+  }
+
+  if (lists[0]?.id) {
+    return lists[0].id;
+  }
+
+  throw new Error("No task lists found. Create one in Google Tasks first.");
+}
+
+export async function taskListLists(): Promise<{ success: boolean; taskLists?: TaskList[]; error?: string }> {
+  try {
+    const tasks = await getTasksClient();
+    const response = await tasks.tasklists.list({ maxResults: 100 });
+    const taskLists = (response.data.items || []).map((tl) => ({
+      id: tl.id || "",
+      title: tl.title || "(No title)",
+      updated: tl.updated || "",
+    }));
+
+    return { success: true, taskLists };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to list task lists",
+    };
+  }
+}
+
+export async function tasksListTasks(
+  taskListId: string = "@default",
+  showCompleted: boolean = true,
+  showHidden: boolean = true,
+): Promise<{ success: boolean; tasks?: Task[]; error?: string }> {
+  try {
+    const tasks = await getTasksClient();
+    const listsResponse = await tasks.tasklists.list({ maxResults: 100 });
+    const resolvedId = resolveTaskListId(taskListId, listsResponse.data.items || []);
+
+    const response = await tasks.tasks.list({
+      tasklist: resolvedId,
+      showCompleted,
+      showHidden,
+    });
+
+    const items = (response.data.items || []).map((t) => ({
+      id: t.id || "",
+      title: t.title || "(No title)",
+      notes: t.notes || undefined,
+      due: t.due || undefined,
+      status: t.status || "needsAction",
+      completed: t.completed || undefined,
+      updated: t.updated || "",
+      parent: t.parent || undefined,
+      position: t.position || "",
+    }));
+
+    return { success: true, tasks: items };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to list tasks",
+    };
+  }
+}
+
+export async function tasksCreateTask(
+  title: string,
+  notes?: string,
+  due?: string,
+  taskListId: string = "@default",
+): Promise<{ success: boolean; task?: Task; error?: string }> {
+  try {
+    const tasks = await getTasksClient();
+    const listsResponse = await tasks.tasklists.list({ maxResults: 100 });
+    const resolvedId = resolveTaskListId(taskListId, listsResponse.data.items || []);
+
+    const requestBody: tasks_v1.Schema$Task = { title };
+    if (notes) requestBody.notes = notes;
+    if (due) requestBody.due = due;
+
+    const response = await tasks.tasks.insert({
+      tasklist: resolvedId,
+      requestBody,
+    });
+
+    const task: Task = {
+      id: response.data.id || "",
+      title: response.data.title || "",
+      notes: response.data.notes || undefined,
+      due: response.data.due || undefined,
+      status: response.data.status || "needsAction",
+      completed: response.data.completed || undefined,
+      updated: response.data.updated || "",
+      position: response.data.position || "",
+    };
+
+    return { success: true, task };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create task",
+    };
+  }
+}
+
+export async function taskUpdateTask(
+  taskId: string,
+  requestBody: tasks_v1.Schema$Task,
+  taskListId: string = "@default",
+): Promise<{ success: boolean; task?: Task; error?: string }> {
+  try {
+    const tasks = await getTasksClient();
+    const listsResponse = await tasks.tasklists.list({ maxResults: 100 });
+    const resolvedId = resolveTaskListId(taskListId, listsResponse.data.items || []);
+
+    const response = await tasks.tasks.patch({
+      tasklist: resolvedId,
+      task: taskId,
+      requestBody,
+    });
+
+    const task: Task = {
+      id: response.data.id || "",
+      title: response.data.title || "",
+      notes: response.data.notes || undefined,
+      due: response.data.due || undefined,
+      status: response.data.status || "needsAction",
+      completed: response.data.completed || undefined,
+      updated: response.data.updated || "",
+      position: response.data.position || "",
+    };
+
+    return { success: true, task };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update task",
+    };
+  }
+}
+
+export async function taskDeleteTask(
+  taskId: string,
+  taskListId: string = "@default",
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const tasks = await getTasksClient();
+    const listsResponse = await tasks.tasklists.list({ maxResults: 100 });
+    const resolvedId = resolveTaskListId(taskListId, listsResponse.data.items || []);
+
+    await tasks.tasks.delete({
+      tasklist: resolvedId,
+      task: taskId,
+    });
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to delete task",
     };
   }
 }
