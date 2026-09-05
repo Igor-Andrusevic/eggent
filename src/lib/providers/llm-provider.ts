@@ -1724,6 +1724,16 @@ export function createModel(
       });
     }
 
+    case "cliproxy": {
+      return createOpenAICompatibleChatModel(config, {
+        providerName: "cliproxy",
+        apiKey: config.apiKey || process.env.CLIPROXY_API_KEY || "",
+        fallbackBaseUrl:
+          process.env.CLIPROXY_API_BASE_URL || "http://127.0.0.1:8317/v1",
+        defaultPath: "/v1",
+      });
+    }
+
     case "codex-cli": {
       try {
         return createCodexNativeOauthModel(config);

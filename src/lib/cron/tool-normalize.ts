@@ -316,7 +316,7 @@ function normalizePayloadFromRecord(input: UnknownRecord): CronJobCreate["payloa
   if (modelRaw) {
     const rawProvider = readString(modelRaw.provider) ?? "";
     const modelName = readString(modelRaw.model) ?? readString(modelRaw.modelName);
-    const validProviders = ["openai", "anthropic", "google", "openrouter", "ollama", "custom", "codex-cli", "gemini-cli", "zhipuai"] as const;
+    const validProviders = ["openai", "anthropic", "google", "openrouter", "ollama", "custom", "codex-cli", "gemini-cli", "zhipuai", "cliproxy"] as const;
     const provider = validProviders.find((p) => p === rawProvider.toLowerCase());
     if (provider && modelName) {
       const temperature = readNumber(modelRaw.temperature);

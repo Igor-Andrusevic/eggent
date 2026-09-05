@@ -1,34 +1,38 @@
 # Google Calendar Create Event
 
-Create a new event in Google Calendar.
+Создать событие в Google Calendar с точным временем.
 
-## When to Use
-- User asks to schedule a meeting or event
-- User wants to add something to their calendar
-- User mentions creating a reminder or appointment
+## When to Use — ВСЕГДА когда есть время
+- **Пользователь указал конкретное время** (например "в 19:00", "на 15:30", "завтра в 10 утра") — используй этот инструмент, а НЕ create_task
+- Пользователь просит добавить встречу, событие, напоминание с временем
+- Пользователь хочет видеть запись в календаре с указанием времени
 
 ## Parameters
-- `summary`: Event title (required)
-- `start`: Start time ISO 8601 or date YYYY-MM-DD for all-day (required)
-- `end`: End time ISO 8601 or date YYYY-MM-DD for all-day (required)
-- `description`: Event description (optional)
-- `location`: Location or video call URL (optional)
-- `attendees`: Array of email addresses (optional)
+- `summary`: Название события (обязательно)
+- `start`: Начало события в ISO 8601 ВСЕГДА с временем (обязательно)
+- `end`: Конец события в ISO 8601 ВСЕГДА с временем (обязательно)
+- `description`: Описание (опционально)
+- `location`: Место или ссылка на видеозвонок (опционально)
+- `attendees`: Массив email участников (опционально)
 
-## Time Format
-- Timed event: `2024-01-15T10:30:00` (ISO 8601)
-- All-day event: `2024-01-15` (date only)
+## КРИТИЧЕСКИ ВАЖНО — Время
+- **ВСЕГДА передавай время в UTC с суффиксом Z**: `2026-07-05T16:00:00Z`
+- Используй ТОЛЬКО формат с `Z` (UTC), никогда не передавай время без суффикса
+- Пересчитывай локальное время пользователя в UTC:
+  - Москва (UTC+3): 19:00 → `T16:00:00Z`
+  - Екатеринбург (UTC+5): 19:00 → `T14:00:00Z`
+  - Калининград (UTC+2): 19:00 → `T17:00:00Z`
+- All-day события используй ТОЛЬКО если пользователь явно сказал "на весь день"
+- **Если пользователь не указал время окончания**, установи продолжительность 1 час по умолчанию
+- **Если пользователь не указал время начала**, спроси его
 
-## Best Practices
-- Always confirm event details with user before creating
-- Include timezone consideration for the user's location
-- For video calls, add meeting URL to location field
-- Ask about attendees if it seems like a meeting
+## Ответ при успехе
+Покажи: название, дату/время начала и конца (в UTC и локальном времени пользователя), ID события, ссылку на календарь.
 
-## Example
+## Пример (Москва, UTC+3)
+Пользователь: "Создай встречу завтра в 19:00"
 ```
-summary: "Team Standup"
-start: "2024-01-15T09:00:00"
-end: "2024-01-15T09:30:00"
-attendees: ["team@example.com"]
+summary: "Встреча"
+start: "2026-07-06T16:00:00Z"
+end: "2026-07-06T17:00:00Z"
 ```

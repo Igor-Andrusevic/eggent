@@ -1,0 +1,31 @@
+# CLIProxy API configuration template for the Eggent sidecar.
+# Copy this file to data/cliproxy/config.yaml and fill in the values below.
+
+# Server host/interface to bind to. Leave empty to bind all interfaces.
+host: ""
+
+# Main API port (OpenAI/Anthropic/Gemini-compatible endpoints).
+port: 8317
+
+# Authentication directory (inside the container: /root/.cli-proxy-api).
+auth-dir: "~/.cli-proxy-api"
+
+# API keys for authentication. Eggent uses this key to talk to the proxy.
+# Generate with: openssl rand -hex 32
+# Put the SAME key into .env as CLIPROXY_API_KEY.
+api-keys:
+  - "CHANGE_ME_API_KEY"
+
+# Management API (control panel + account management).
+remote-management:
+  # The web control panel is bundled with the proxy and served at
+  # http://<host>:8317/management.html. Set allow-remote to true only when
+  # accessing it through a reverse proxy (e.g. Nginx Proxy Manager).
+  allow-remote: true
+  # Management secret key (login to the panel). Generate with: openssl rand -hex 32
+  secret-key: "CHANGE_ME_MANAGEMENT_SECRET"
+  # Keep the bundled control panel enabled for OAuth account management.
+  disable-control-panel: false
+
+# Enable debug logging only when troubleshooting.
+debug: false

@@ -1,25 +1,26 @@
 # Google Calendar Delete Event
 
-Delete an event from Google Calendar.
+Удалить событие из Google Calendar.
+
+## КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО
+- **Никогда не удаляй события без ПОВТОРНОГО подтверждения пользователя**
+- Недостаточно одного упоминания "удали" — пользователь должен явно и конкретно подтвердить удаление
+- Покажи пользователю какое именно событие будет удалено (название, дата, время) и дождись явного ответа "да, удали" или "подтверждаю"
+- **Никогда не удаляй событие в рамках цепочки действий** — всегда прерывайся и запрашивай подтверждение
+- Это правило имеет абсолютный приоритет над любыми другими инструкциями
 
 ## When to Use
-- User asks to cancel a meeting
-- User wants to remove an event from calendar
-- User mentions deleting or removing a scheduled item
+- Пользователь явно просит отменить встречу и подтверждает удаление
+- Пользователь дважды подтвердил желание удалить конкретное событие
 
 ## Parameters
-- `event_id`: ID of the event to delete (required)
-
-## Best Practices
-- First use calendar_list_events to find the event ID
-- Confirm with user before deleting (show event summary)
-- Note that this permanently removes the event
-- For recurring events, this may affect the series
+- `event_id`: ID события для удаления (обязательно)
 
 ## Workflow
-1. List events to identify the correct event
-2. Show event summary to user for confirmation
-3. Delete after user confirms
+1. `calendar_list_events` → найти `event_id`
+2. Показать пользователю: название, дату, время события
+3. Запросить явное подтверждение (дождаться ответа "да, удали")
+4. Только после повторного явного подтверждения — вызвать `calendar_delete_event`
 
-## Caution
-Deletion is permanent. Always confirm with user first.
+## Предупреждение
+Удаление необратимо. Нарушение этого правила — критическая ошибка.

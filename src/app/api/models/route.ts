@@ -100,6 +100,7 @@ export async function GET(req: NextRequest) {
                     google: process.env.GOOGLE_API_KEY,
                     zhipuai: process.env.ZHIPUAI_API_KEY,
                     deepseek: process.env.DEEPSEEK_API_KEY,
+                    cliproxy: process.env.CLIPROXY_API_KEY,
                 };
                 apiKey = envMap[provider] || "";
             }
@@ -235,6 +236,39 @@ export async function GET(req: NextRequest) {
                 });
                 if (!res.ok) {
                     throw new Error(`Custom OpenAI-compatible API error: ${res.status}`);
+                }
+                const data = await res.json();
+                models = mapOpenAICompatibleModels(data);
+                break;
+            }
+
+            case "cliproxy": {
+                if (type === "embedding") {
+                    models = [];
+                    break;
+                }
+                const rawBaseUrl = (
+                    searchParams.get("baseUrl") ||
+                    process.env.CLIPROXY_API_BASE_URL ||
+                    "http://127.0.0.1:8317/v1"
+                ).trim();
+                const normalizedBaseUrl = normalizeOpenAICompatibleBaseUrl(rawBaseUrl);
+
+                if (searchParams.get("baseUrl")) {
+                    const ssrf = validateUrlForFetch(normalizedBaseUrl);
+                    if (!ssrf.safe) {
+                        return Response.json({ error: ssrf.reason }, { status: 400 });
+                    }
+                }
+
+                const headers: Record<string, string> = {};
+                if (apiKey.trim()) {
+                    headers.Authorization = `Bearer ${apiKey}`;
+                }
+
+                const res = await fetch(`${normalizedBaseUrl}/models`, { headers });
+                if (!res.ok) {
+                    throw new Error(`CLIProxy API error: ${res.status}`);
                 }
                 const data = await res.json();
                 models = mapOpenAICompatibleModels(data);

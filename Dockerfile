@@ -88,7 +88,9 @@ RUN npm install --omit=dev --no-package-lock
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/bundled-skills ./bundled-skills
+COPY --from=builder /app/src/prompts ./src/prompts
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
+COPY --from=builder /app/scripts/transcribe-whisper.py ./scripts/transcribe-whisper.py
 
 RUN mkdir -p /app/data/tmp /app/data/ms-playwright /app/data/npm-cache /app/data/.cache \
   && chmod +x /app/scripts/docker-entrypoint.sh \

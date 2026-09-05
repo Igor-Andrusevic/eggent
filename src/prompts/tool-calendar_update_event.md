@@ -1,28 +1,32 @@
 # Google Calendar Update Event
 
-Update an existing Google Calendar event.
+Обновить существующее событие в Google Calendar.
 
 ## When to Use
-- User wants to reschedule an event
-- User asks to change event details
-- User mentions updating a meeting
+- Пользователь хочет перенести/изменить событие
+- Пользователь просит изменить детали встречи
+- Пользователь говорит "перенеси встречу на ..."
 
 ## Parameters
-- `event_id`: ID of event to update (required)
-- `summary`: New title (optional)
-- `start`: New start time (optional)
-- `end`: New end time (optional)
-- `description`: New description (optional)
-- `location`: New location (optional)
-- `attendees`: New attendee list (optional)
+- `event_id`: ID события для обновления (обязательно)
+- `summary`: Новое название (опционально)
+- `start`: Новое время начала (опционально)
+- `end`: Новое время конца (опционально)
+- `description`: Новое описание (опционально)
+- `location`: Новое место (опционально)
+- `attendees`: Новый список участников (опционально)
+
+## КРИТИЧЕСКИ ВАЖНО — Время
+- **ВСЕГДА передавай время в UTC с суффиксом Z**: `2026-07-05T16:00:00Z`
+- Используй ТОЛЬКО формат с `Z` (UTC)
+- Пересчитывай локальное время пользователя в UTC (см. calendar_create_event)
 
 ## Best Practices
-- First use calendar_list_events to find the event ID
-- Only include fields that need to be changed
-- Confirm changes with user before applying
-- For time changes, ensure both start and end are appropriate
+- Сначала используй `calendar_list_events` чтобы найти `event_id`
+- Передавай только те поля, которые нужно изменить
+- Подтверждай изменения с пользователем
 
 ## Workflow
-1. List events to find the event_id
-2. Confirm what changes user wants
-3. Call update with only changed fields
+1. `calendar_list_events` → найти event_id
+2. Уточнить у пользователя что именно изменить
+3. Вызвать `calendar_update_event` только с изменёнными полями

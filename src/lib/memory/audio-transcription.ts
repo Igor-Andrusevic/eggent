@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import type { AppSettings } from "@/lib/types";
 import { transcribeWithGemini as geminiTranscribe } from "./gemini-transcription";
+import { transcribeWithWhisper as localWhisperTranscribe } from "./whisper-transcription";
 
 /**
  * Supported audio file extensions for transcription
@@ -11,7 +12,7 @@ const AUDIO_EXTENSIONS = new Set([
   ".webm", ".amr", ".flac", ".wma"
 ]);
 
-export type TranscriptionProvider = "auto" | "gemini" | "openai";
+export type TranscriptionProvider = "auto" | "gemini" | "openai" | "whisper-local";
 
 /**
  * Check if a file is an audio file based on extension
@@ -26,6 +27,8 @@ export function isAudioFile(filename: string): boolean {
  */
 function detectAvailableProviders(settings: AppSettings): TranscriptionProvider[] {
   const available: TranscriptionProvider[] = [];
+
+  available.push("whisper-local");
 
   // Check for Google API key (Gemini)
   const googleKey = process.env.GOOGLE_API_KEY?.trim() ||
@@ -51,16 +54,14 @@ function selectProvider(settings: AppSettings, preferred?: TranscriptionProvider
   const available = detectAvailableProviders(settings);
 
   if (available.length === 0) {
-    throw new Error("No transcription providers available. Please configure GOOGLE_API_KEY or OPENAI_API_KEY.");
+    throw new Error("No transcription providers available.");
   }
 
-  // Use preferred if specified and available
   if (preferred && preferred !== "auto" && available.includes(preferred)) {
     return preferred;
   }
 
-  // Prefer Gemini (has free tier) over OpenAI
-  return available.includes("gemini") ? "gemini" : available[0];
+  return available.includes("whisper-local") ? "whisper-local" : available[0];
 }
 
 /**
@@ -135,6 +136,22 @@ async function transcribeWithOpenAI(
 }
 
 /**
+ * Transcribe using local Whisper (faster-whisper via Python)
+ */
+async function transcribeWithLocalWhisper(
+  audioFilePath: string,
+  _settings: AppSettings
+): Promise<string> {
+  try {
+    return await localWhisperTranscribe(audioFilePath);
+  } catch (error) {
+    throw new Error(
+      `Local whisper transcription failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
  * Transcribe an audio file using available provider
  *
  * @param audioFilePath - Path to the audio file
@@ -148,18 +165,22 @@ export async function transcribeAudio(
   preferredProvider: TranscriptionProvider = "auto"
 ): Promise<string> {
   try {
-    // Check if file exists
     await fs.access(audioFilePath);
 
-    // Select provider
-    const provider = selectProvider(settings, preferredProvider);
+    let provider = preferredProvider;
+    if (provider === "auto" && settings.transcription?.provider) {
+      provider = settings.transcription.provider as TranscriptionProvider;
+    }
+
+    provider = selectProvider(settings, provider);
     console.log(`[Audio Transcription] Using provider: ${provider}`);
 
-    // Route to appropriate provider
     if (provider === "gemini") {
       return await transcribeWithGemini(audioFilePath, settings);
     } else if (provider === "openai") {
       return await transcribeWithOpenAI(audioFilePath, settings);
+    } else if (provider === "whisper-local") {
+      return await transcribeWithLocalWhisper(audioFilePath, settings);
     }
 
     throw new Error(`Unsupported provider: ${provider}`);

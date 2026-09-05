@@ -36,8 +36,16 @@ Eggent — локальная AI-платформа для создания ко
 | **Codex CLI** | GPT-5.x Codex | Не требуется | OAuth |
 | **Gemini CLI** | Gemini 3.1/2.5 | Не требуется | OAuth |
 | **Custom** | Любой OpenAI-совместимый API | Зависит | API Key |
+| **CLIProxy API** | ChatGPT/Claude/Gemini/Grok подписки (динамический список) | `CLIPROXY_API_KEY` | API Key |
 
 ## Улучшения форка
+
+### Автономность и стабильность агента
+- **Увеличенный лимит шагов (100 вместо 15)** — агент больше не прерывается на 15 вызовах инструментов при сложных цепочках (поиск, чтение нескольких документов, обработка файлов, сохранение).
+- **Убран принудительный фоллбек `Send continue`** — устранены обрывы ответов, агент работает автономно до достижения финального результата.
+- **Очистка сиротских сообщений (`cleanOrphanedToolMessages`)** — устранена ошибка 400 у провайдеров из-за оборванных или несогласованных вызовов инструментов в истории.
+- **Защита от пустых сообщений в Telegram** — информативные уведомления о ходе выполнения задач и исключение заглушек вида «Пустой ответ от агента».
+- **Локальная транскрибация аудио через Whisper** — автоматический fallback на модель Whisper (`small`) при сбоях внешних API транскрибации.
 
 ### Google Workspace
 - **Google Tasks** — управление задачами через AI-агента: создание, обновление, отметка выполнения, удаление; автоматический поиск списка задач пользователя; автодобавление заметки «Created by Eggent AI»
@@ -96,6 +104,46 @@ python3 scripts/jina_reader.py research https://arxiv.org/abs/2305.10688
 - **NotebookLM** — генерация подкастов
 - **YouTube-поиск** — `yt-dlp` в Docker-образе
 - **Bitrix24, SendforSign** — дополнительные навыки в комплекте
+
+## CLIProxy API
+
+Интеграция [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — локального прокси, который позволяет использовать подписки ChatGPT (Codex), Claude Code, Gemini (Antigravity) и Grok без платных API-ключей. Eggent запускает CLIProxyAPI как отдельный контейнер (сайдкар) и подключается к нему как к OpenAI-совместимому провайдеру.
+
+### Настройка
+
+1. Скопируйте шаблон конфига и задайте ключи:
+
+```bash
+cp cliproxy-config.example.yaml data/cliproxy/config.yaml
+# api-key (прокси-ключ) и secret-key (управленческий ключ):
+openssl rand -hex 32
+```
+
+2. Укажите `CLIPROXY_API_KEY` в `.env` (должен совпадать с `api-keys` из `config.yaml`):
+
+```bash
+CLIPROXY_API_KEY=<прокси-ключ>
+```
+
+3. Запустите сайдкар:
+
+```bash
+docker compose up -d cli-proxy-api
+docker compose logs -f cli-proxy-api   # должен появиться "API server started successfully"
+```
+
+4. Откройте веб-панель управления для добавления аккаунтов (OAuth):
+
+- Панель встроена в прокси: `http://<host>:8317/management.html`. Вход по **управленческому ключу** (`remote-management.secret-key`), а не по прокси-ключу.
+- Для удалённого доступа добавьте Proxy Host в Nginx Proxy Manager (например `cliproxy.<домен>` → `http://cli-proxy-api:8317`, Websockets on, SSL) — конфиг по умолчанию уже включает `allow-remote: true`, панель остаётся под управленческим ключом.
+- Во вкладке **OAuth** запустите OAuth/device-флоу для нужного провайдера (Claude Code / Codex / Antigravity / Grok / Kimi).
+
+5. В дашборде Eggent выберите провайдер **CLIProxy API**, вставьте **прокси-ключ** и выберите модель. Список моделей подтягивается динамически из `/v1/models` (зависит от подключённых аккаунтов).
+
+Примечания:
+- Провайдер доступен для основной модели, utilityModel и cron-задач (вручную). В автоматическую fallback-цепочку cron он не входит.
+- Сайдкар работает в Docker-сети Eggent по адресу `http://cli-proxy-api:8317/v1`; порт 8317 на хосте привязан к `127.0.0.1` (наружу не публикуется — внешний доступ через NPM при необходимости).
+- `data/cliproxy/` (конфиг, OAuth-токены, логи) хранится в git-ignored `data/`.
 
 ## Установка
 
@@ -269,7 +317,7 @@ curl -X POST http://localhost:3000/api/projects/<project-id>/cron \
 
 ### Доступные провайдеры
 
-`openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `zhipuai`, `ollama`, `codex-cli`, `gemini-cli`, `custom`
+`openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `zhipuai`, `ollama`, `codex-cli`, `gemini-cli`, `cliproxy`, `custom`
 
 Если `model` не указан — используется глобальная модель из настроек. Если указанная модель недоступна — cron пробует альтернативных провайдеров (Google → DeepSeek → OpenAI → Anthropic → OpenRouter → Zhipu), проверяя наличие API-ключей в `.env`.
 

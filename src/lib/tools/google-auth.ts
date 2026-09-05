@@ -13,6 +13,7 @@ const SCOPES = [
   "https://www.googleapis.com/auth/gmail.labels",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/tasks",
 ];
 
 export interface GoogleTokens {
@@ -34,19 +35,35 @@ async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
 }
 
+export function getBaseUrl(): string {
+  const raw = process.env.APP_BASE_URL || `http://localhost:${process.env.APP_PORT || 3000}`;
+  return raw.replace(/\/+$/, "");
+}
+
+export function getRedirectUri(): string {
+  const baseUrl = getBaseUrl();
+
+  if (process.env.NODE_ENV === "development" && !process.env.APP_BASE_URL) {
+    console.warn(
+      "[google-oauth] APP_BASE_URL not set, using default:",
+      baseUrl,
+      "(Google will reject this in production with redirect_uri_mismatch)",
+    );
+  }
+
+  return `${baseUrl}/api/google-oauth/callback`;
+}
+
 async function getOAuthConfig(): Promise<{ clientId: string; clientSecret: string; redirectUri: string } | null> {
   const settings = await getSettings();
   const clientId = settings.googleWorkspace?.clientId?.trim();
   const clientSecret = settings.googleWorkspace?.clientSecret?.trim();
-  
+
   if (!clientId || !clientSecret) {
     return null;
   }
-  
-  const baseUrl = process.env.APP_BASE_URL || `http://localhost:${process.env.APP_PORT || 3000}`;
-  const redirectUri = `${baseUrl}/api/google-oauth/callback`;
-  
-  return { clientId, clientSecret, redirectUri };
+
+  return { clientId, clientSecret, redirectUri: getRedirectUri() };
 }
 
 export async function createOAuth2Client(): Promise<OAuth2Client | null> {
@@ -141,6 +158,17 @@ export async function deleteTokens(): Promise<void> {
   }
 }
 
+async function verifyAccessToken(accessToken: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`,
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function getOAuthStatus(): Promise<OAuthStatus> {
   const config = await getOAuthConfig();
   
@@ -171,47 +199,31 @@ export async function getOAuthStatus(): Promise<OAuthStatus> {
       };
     }
     
-    // Verify token by fetching user info
-    const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-      headers: {
-        Authorization: `Bearer ${client.credentials.access_token}`,
-      },
-    });
-    
-    if (!response.ok) {
-      // Token might be expired, try to refresh
+    const tokenValid = await verifyAccessToken(client.credentials.access_token as string);
+
+    if (!tokenValid) {
       await client.getAccessToken();
-      
+
       if (client.credentials.access_token) {
-        const retryResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-          headers: {
-            Authorization: `Bearer ${client.credentials.access_token}`,
-          },
-        });
-        
-        if (retryResponse.ok) {
-          const userInfo = await retryResponse.json() as { email?: string };
+        const retryValid = await verifyAccessToken(client.credentials.access_token as string);
+        if (retryValid) {
           return {
             connected: true,
             hasCredentials: true,
-            email: userInfo.email,
           };
         }
       }
-      
+
       return {
         connected: false,
         hasCredentials: true,
         error: "Token expired or invalid",
       };
     }
-    
-    const userInfo = await response.json() as { email?: string };
-    
+
     return {
       connected: true,
       hasCredentials: true,
-      email: userInfo.email,
     };
   } catch (error) {
     return {

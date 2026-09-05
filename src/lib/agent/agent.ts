@@ -20,7 +20,7 @@ import type { ChatMessage, ModelConfig } from "@/lib/types";
 import { publishUiSyncEvent } from "@/lib/realtime/event-bus";
 
 const LLM_LOG_BORDER = "═".repeat(60);
-const MAX_TOOL_STEPS_PER_TURN = 15;
+const MAX_TOOL_STEPS_PER_TURN = 100;
 const MAX_TOOL_STEPS_SUBORDINATE = 15;
 const POLL_NO_PROGRESS_BLOCK_THRESHOLD = 16;
 const POLL_BACKOFF_SCHEDULE_MS = [5000, 10000, 30000, 60000] as const;
@@ -594,8 +594,51 @@ function validateAndFixGeminiToolOrdering(messages: ModelMessage[]): ModelMessag
   return finalResult;
 }
 
-function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string): ModelMessage[] {
+function cleanOrphanedToolMessages(messages: ModelMessage[]): ModelMessage[] {
+  const pendingToolCallIds = new Set<string>();
   const result: ModelMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "assistant") {
+      const content = msg.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part && typeof part === "object" && "type" in part && part.type === "tool-call" && "toolCallId" in part) {
+            pendingToolCallIds.add((part as { toolCallId: string }).toolCallId);
+          }
+        }
+      }
+      result.push(msg);
+    } else if (msg.role === "tool") {
+      const content = msg.content;
+      if (Array.isArray(content)) {
+        const validParts = content.filter(part => {
+          if (part && typeof part === "object" && "type" in part && part.type === "tool-result" && "toolCallId" in part) {
+            const toolCallId = (part as { toolCallId: string }).toolCallId;
+            if (pendingToolCallIds.has(toolCallId)) {
+              pendingToolCallIds.delete(toolCallId);
+              return true;
+            }
+            return false;
+          }
+          return true;
+        });
+        if (validParts.length > 0) {
+          result.push({ role: "tool", content: validParts });
+        }
+      } else {
+        result.push(msg);
+      }
+    } else {
+      result.push(msg);
+    }
+  }
+
+  return result;
+}
+
+function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string): ModelMessage[] {
+  let result: ModelMessage[] = [];
 
   for (const m of messages) {
     if (m.role === "tool") {
@@ -641,8 +684,8 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: 
     // Skip system messages for now
   }
 
-  // Validate ordering for Gemini
-  if (provider === "google") {
+  result = cleanOrphanedToolMessages(result);
+  if (provider === "google" || provider === "zhipuai") {
     return validateAndFixGeminiToolOrdering(result);
   }
 
@@ -983,7 +1026,7 @@ function buildMissingFinalResponseFallback(options: {
     );
   }
 
-  fallbackLines.push("Send `continue` and I will finish the answer.");
+  fallbackLines.push("Пожалуйста, подождите или отправьте уточнение.");
   return fallbackLines.join("\n\n");
 }
 
@@ -1063,8 +1106,9 @@ export async function runAgent(options: {
     
     // Re-validate after trimming - trimming can create orphaned tool results at the start
     // This is crucial: we must validate AFTER History.trim() has run
-    // Both Google and Zhipu have strict message ordering requirements
+    // Clean orphaned tool messages for ALL providers, not just Google/Zhipu
     let historyMessages = history.getAll();
+    historyMessages = cleanOrphanedToolMessages(historyMessages);
     if (needsStrictOrdering) {
       historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
     }
@@ -1208,7 +1252,7 @@ export async function runAgent(options: {
     temperature: settings.chatModel.temperature ?? 0.7,
     maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
     onStepFinish: async (step) => {
-      latestStepResponseMessages = step.response.messages;
+      latestStepResponseMessages = [...latestStepResponseMessages, ...step.response.messages];
       lastFinishReason = step.finishReason;
     },
     onAbort: async () => {
@@ -1218,7 +1262,7 @@ export async function runAgent(options: {
 
       await cleanupMcpIfNeeded();
 
-      const responseMessages = latestStepResponseMessages;
+      const responseMessages = cleanOrphanedToolMessages(latestStepResponseMessages);
       const responseToolText = getLastResponseToolText(responseMessages).trim();
       const lastAssistantText = getLastAssistantText(responseMessages);
       const hasFinalText = hasVisibleText(lastAssistantText) || hasVisibleText(responseToolText);
@@ -1258,12 +1302,12 @@ export async function runAgent(options: {
         console.warn(`[runAgent] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
         
         try {
-          const shortHistory = context.history.slice(-10);
+          const shortHistory = cleanOrphanedToolMessages(context.history.slice(-10));
           const retryMessages: ModelMessage[] = [
             ...shortHistory,
             { role: "user", content: options.userMessage },
           ];
-          
+           
           const retryResult = await generateText({
             model,
             system: systemPrompt,
@@ -1308,7 +1352,7 @@ export async function runAgent(options: {
         persistedByOnError = true;
         await cleanupMcpIfNeeded();
 
-        const responseMessages = latestStepResponseMessages;
+        const responseMessages = cleanOrphanedToolMessages(latestStepResponseMessages);
         const responseToolText = getLastResponseToolText(responseMessages).trim();
         const lastAssistantText = getLastAssistantText(responseMessages);
         const hasFinalText = hasVisibleText(lastAssistantText) || hasVisibleText(responseToolText);
@@ -1465,7 +1509,8 @@ export async function runAgentText(options: {
     let historyMessages = history.getAll();
     
     // Re-validate after trimming - trimming can create orphaned tool results at the start
-    // Both Google and Zhipu have strict message ordering requirements
+    // Clean orphaned tool messages for ALL providers, not just Google/Zhipu
+    historyMessages = cleanOrphanedToolMessages(historyMessages);
     if (needsStrictOrdering) {
       historyMessages = validateAndFixGeminiToolOrdering(historyMessages);
     }
@@ -1577,7 +1622,7 @@ export async function runAgentText(options: {
     if (is400Error && context.history.length > 10) {
       console.warn(`[runAgentText] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
       
-      const shortHistory = context.history.slice(-10);
+      const shortHistory = cleanOrphanedToolMessages(context.history.slice(-10));
       const retryMessages: ModelMessage[] = [
         ...shortHistory,
         { role: "user", content: options.userMessage },

@@ -17,7 +17,8 @@ export interface ModelConfig {
     | "codex-cli"
     | "gemini-cli"
     | "zhipuai"
-    | "deepseek";
+    | "deepseek"
+    | "cliproxy";
   model: string;
   apiKey?: string;
   authMethod?: ChatAuthMethod;
@@ -32,6 +33,7 @@ export interface GoogleWorkspaceSettings {
   clientSecret?: string;
   gmailEnabled?: boolean;
   calendarEnabled?: boolean;
+  tasksEnabled?: boolean;
 }
 
 export interface AppSettings {
@@ -70,6 +72,9 @@ export interface AppSettings {
     username: string;
     passwordHash: string;
     mustChangeCredentials: boolean;
+  };
+  transcription?: {
+    provider: "auto" | "whisper-local" | "gemini" | "openai";
   };
   googleWorkspace?: GoogleWorkspaceSettings;
   apiKeysByProvider?: Record<string, string>;

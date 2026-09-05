@@ -26,6 +26,11 @@ import {
   calendarCreateEvent,
   calendarUpdateEvent,
   calendarDeleteEvent,
+  tasksListTasklists,
+  tasksGetTasks,
+  tasksCreate,
+  tasksPatch,
+  tasksDelete,
 } from "@/lib/tools/google-workspace-tools";
 import { knowledgeQuery } from "@/lib/tools/knowledge-query";
 import { smartSearch } from "@/lib/tools/smart-search";
@@ -1394,20 +1399,20 @@ export async function createAgentTools(
     if (settings.googleWorkspace.calendarEnabled) {
       tools.calendar_list_events = tool({
         description:
-          "List events from Google Calendar within a date range. Default shows next 7 days. Returns event IDs, summaries, times, locations, and attendees.",
+          "Показать события из Google Calendar. Время передаётся в UTC с суффиксом Z. По умолчанию показывает следующие 7 дней.",
         inputSchema: z.object({
           time_min: z
             .string()
             .optional()
-            .describe("Start of range ISO 8601 (default: now)"),
+            .describe("Начало диапазона в UTC (по умолчанию: сейчас)"),
           time_max: z
             .string()
             .optional()
-            .describe("End of range ISO 8601 (default: 7 days from now)"),
+            .describe("Конец диапазона в UTC (по умолчанию: +7 дней)"),
           max_results: z
             .number()
             .default(20)
-            .describe("Maximum events to return"),
+            .describe("Максимальное количество событий"),
         }),
         execute: async ({ time_min, time_max, max_results }) => {
           return calendarListEvents(time_min, time_max, max_results);
@@ -1416,21 +1421,21 @@ export async function createAgentTools(
 
       tools.calendar_create_event = tool({
         description:
-          "Create a new event in Google Calendar. Supports timed events (ISO 8601) and all-day events (YYYY-MM-DD). Optionally add description, location, and attendees.",
+          "Создать событие в Google Calendar с точным временем. ВСЕГДА используй этот инструмент, когда пользователь указывает конкретное время (например 'в 19:00', 'на 15:30'). Время передавай строго в UTC с суффиксом Z. Пересчитывай локальное время в UTC: Москва UTC+3, Калининград UTC+2, Екатеринбург UTC+5. Если время окончания не указано — ставь +1 час.",
         inputSchema: z.object({
-          summary: z.string().describe("Event title"),
+          summary: z.string().describe("Название события"),
           start: z
             .string()
-            .describe("Start time ISO 8601 or date YYYY-MM-DD for all-day"),
+            .describe("Время начала в UTC с Z: например 2026-07-05T16:00:00Z (19:00 МСК = 16:00 UTC)"),
           end: z
             .string()
-            .describe("End time ISO 8601 or date YYYY-MM-DD for all-day"),
-          description: z.string().optional().describe("Event description"),
-          location: z.string().optional().describe("Location or video call URL"),
+            .describe("Время конца в UTC с Z: например 2026-07-05T18:00:00Z"),
+          description: z.string().optional().describe("Описание события"),
+          location: z.string().optional().describe("Место или ссылка на видеозвонок"),
           attendees: z
             .array(z.string())
             .optional()
-            .describe("List of attendee email addresses"),
+            .describe("Список email участников"),
         }),
         execute: async ({ summary, start, end, description, location, attendees }) => {
           return calendarCreateEvent(summary, start, end, description, location, attendees);
@@ -1439,18 +1444,18 @@ export async function createAgentTools(
 
       tools.calendar_update_event = tool({
         description:
-          "Update an existing Google Calendar event. Only include fields that need to change. First use calendar_list_events to find the event ID.",
+          "Обновить существующее событие в Google Calendar. Время ВСЕГДА в UTC с суффиксом Z. Сначала используй calendar_list_events чтобы найти event_id.",
         inputSchema: z.object({
-          event_id: z.string().describe("ID of event to update"),
-          summary: z.string().optional().describe("New title"),
-          start: z.string().optional().describe("New start time"),
-          end: z.string().optional().describe("New end time"),
-          description: z.string().optional().describe("New description"),
-          location: z.string().optional().describe("New location"),
+          event_id: z.string().describe("ID события для обновления"),
+          summary: z.string().optional().describe("Новое название"),
+          start: z.string().optional().describe("Новое время начала в UTC с Z"),
+          end: z.string().optional().describe("Новое время конца в UTC с Z"),
+          description: z.string().optional().describe("Новое описание"),
+          location: z.string().optional().describe("Новое место"),
           attendees: z
             .array(z.string())
             .optional()
-            .describe("New attendee list"),
+            .describe("Новый список участников"),
         }),
         execute: async ({ event_id, summary, start, end, description, location, attendees }) => {
           return calendarUpdateEvent(event_id, summary, start, end, description, location, attendees);
@@ -1459,12 +1464,118 @@ export async function createAgentTools(
 
       tools.calendar_delete_event = tool({
         description:
-          "Delete an event from Google Calendar. First use calendar_list_events to find the event ID. Always confirm with user before deleting.",
+          "Удалить событие из Google Calendar. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО удалять без ПОВТОРНОГО явного подтверждения пользователя. Покажи событие, дождись ответа 'да, удали', и только потом удаляй.",
         inputSchema: z.object({
-          event_id: z.string().describe("ID of event to delete"),
+          event_id: z.string().describe("ID события для удаления"),
         }),
         execute: async ({ event_id }) => {
           return calendarDeleteEvent(event_id);
+        },
+      });
+    }
+
+    if (settings.googleWorkspace.tasksEnabled) {
+      tools.get_tasklists = tool({
+        description:
+          "Получить список всех задачников (списков задач) пользователя для поиска их tasklist_id.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          return tasksListTasklists();
+        },
+      });
+
+      tools.get_tasks = tool({
+        description:
+          "Получить список задач из конкретного списка.",
+        inputSchema: z.object({
+          tasklist_id: z
+            .string()
+            .default("@default")
+            .describe("ID списка задач. По умолчанию '@default'."),
+          show_completed: z
+            .boolean()
+            .default(false)
+            .describe("Показывать ли выполненные задачи. По умолчанию false."),
+          show_hidden: z
+            .boolean()
+            .default(true)
+            .describe("Показывать ли скрытые задачи (например, без дедлайнов). По умолчанию true, чтобы агент видел все задачи."),
+          max_results: z
+            .number()
+            .default(100)
+            .describe("Максимальное количество возвращаемых задач."),
+        }),
+        execute: async ({ tasklist_id, show_completed, show_hidden, max_results }) => {
+          return tasksGetTasks(tasklist_id, show_completed, show_hidden, max_results);
+        },
+      });
+
+      tools.create_task = tool({
+        description:
+          "Создать новую задачу в Google Tasks. ВАЖНО: Google Tasks НЕ поддерживает время (часы/минуты) — только дату. Если пользователь указал конкретное время (например 'в 19:00'), используй calendar_create_event вместо этого инструмента.",
+        inputSchema: z.object({
+          tasklist_id: z
+            .string()
+            .default("@default")
+            .describe("ID списка задач. По умолчанию '@default'."),
+          title: z.string().describe("Название задачи."),
+          due: z
+            .string()
+            .optional()
+            .describe("Дата выполнения (ТОЛЬКО дата, без времени) в формате YYYY-MM-DDT00:00:00.000Z."),
+          notes: z
+            .string()
+            .optional()
+            .describe("Описание или заметки к задаче. Если пользователь указал время, запиши его сюда и предупреди, что Tasks не показывает время в календаре."),
+        }),
+        execute: async ({ tasklist_id, title, due, notes }) => {
+          return tasksCreate(tasklist_id, title, due, notes);
+        },
+      });
+
+      tools.patch_task = tool({
+        description:
+          "Обновить задачу или отметить как выполненную. Tasks не поддерживает время — если нужно изменить время, предложи calendar_create_event.",
+        inputSchema: z.object({
+          tasklist_id: z
+            .string()
+            .default("@default")
+            .describe("ID списка задач."),
+          task_id: z
+            .string()
+            .describe("Уникальный ID задачи, полученный из get_tasks."),
+          status: z
+            .enum(["needsAction", "completed"])
+            .optional()
+            .describe("Для отметки выполнения передайте 'completed'. Для возврата в активные — 'needsAction'."),
+          title: z
+            .string()
+            .optional()
+            .describe("Новое название задачи."),
+          due: z
+            .string()
+            .optional()
+            .describe("Новая дата выполнения в формате YYYY-MM-DDT00:00:00.000Z."),
+        }),
+        execute: async ({ tasklist_id, task_id, status, title, due }) => {
+          return tasksPatch(tasklist_id, task_id, status, title, due);
+        },
+      });
+
+      tools.delete_task = tool({
+        description:
+          "Удалить задачу по ID. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО удалять без ПОВТОРНОГО явного подтверждения пользователя. Покажи задачу, дождись 'да, удали', и только потом удаляй.",
+        inputSchema: z.object({
+          tasklist_id: z
+            .string()
+            .default("@default")
+            .describe("ID списка задач."),
+          task_id: z
+            .string()
+            .describe("Уникальный ID задачи."),
+        }),
+        execute: async ({ tasklist_id, task_id }) => {
+          return tasksDelete(tasklist_id, task_id);
         },
       });
     }

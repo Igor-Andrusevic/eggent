@@ -149,6 +149,25 @@ export const MODEL_PROVIDERS: Record<string, ProviderConfig> = {
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",
   },
+  cliproxy: {
+    name: "CLIProxy API",
+    models: [],
+    envKey: "CLIPROXY_API_KEY",
+    requiresApiKey: true,
+    authMethods: ["api_key"],
+    defaultAuthMethod: "api_key",
+    connectionHelp: {
+      apiKey: {
+        title: "Connect via CLIProxy API",
+        steps: [
+          "Start the CLIProxy sidecar: docker compose up -d cli-proxy-api",
+          "Open the Management Center at http://127.0.0.1:8085 and add an account (Claude Code / Codex / Gemini / Grok).",
+          "Copy the api-key from data/cliproxy/config.yaml (or set CLIPROXY_API_KEY in .env).",
+          "Paste it below and select a model from the list.",
+        ],
+      },
+    },
+  },
   "zhipuai": {
     name: "Zhipu AI (GLM)",
     models: [

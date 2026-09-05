@@ -7,7 +7,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, Loader2, Moon, Save, ShieldCheck, Sun, Mail, Calendar } from "lucide-react";
+import { Check, CheckSquare, Loader2, Moon, Save, ShieldCheck, Sun, Mail, Calendar } from "lucide-react";
 import { ChatModelWizard, EmbeddingsModelWizard } from "@/components/settings/model-wizards";
 import { updateSettingsByPath } from "@/lib/settings/update-settings-path";
 import type { AppSettings } from "@/lib/types";
@@ -547,7 +547,7 @@ export default function SettingsPage() {
                   <h3 className="font-semibold text-lg">Google Workspace</h3>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Connect Gmail and Google Calendar for AI-powered email and schedule management.
+                  Connect Gmail, Google Calendar and Google Tasks for AI-powered email and task management.
                 </p>
                 <div className="flex items-center gap-3">
                   <input
@@ -607,6 +607,18 @@ export default function SettingsPage() {
                           <Calendar className="size-3" /> Calendar
                         </Label>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="tasks-enabled"
+                          checked={settings.googleWorkspace?.tasksEnabled ?? true}
+                          onChange={(e) => updateSettings("googleWorkspace.tasksEnabled", e.target.checked)}
+                          className="rounded"
+                        />
+                        <Label htmlFor="tasks-enabled" className="flex items-center gap-1">
+                          <CheckSquare className="size-3" /> Tasks
+                        </Label>
+                      </div>
                     </div>
                     {settings.googleWorkspace?.clientId && settings.googleWorkspace?.clientSecret && (
                       <div className="border-t pt-4 space-y-3">
@@ -615,7 +627,9 @@ export default function SettingsPage() {
                             <p className="text-sm font-medium">Google Account</p>
                             <p className="text-xs text-muted-foreground">
                               {googleOAuthStatus?.connected
-                                ? `Connected as ${googleOAuthStatus.email}`
+                                ? googleOAuthStatus.email
+                                  ? `Connected as ${googleOAuthStatus.email}`
+                                  : "Connected"
                                 : "Not connected"}
                             </p>
                           </div>

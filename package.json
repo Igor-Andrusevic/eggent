@@ -11,7 +11,8 @@
     "setup:local": "bash ./scripts/install-local.sh",
     "setup:docker": "bash ./scripts/install-docker.sh",
     "patch:gemini": "bash ./scripts/patch-gemini-fix.sh",
-    "postinstall": "bash ./scripts/patch-gemini-fix.sh || true"
+    "postinstall": "bash ./scripts/patch-gemini-fix.sh || true",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.37",

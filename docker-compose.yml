@@ -1,6 +1,29 @@
 name: eggent
 
 services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - eggent_default
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://127.0.0.1:11434/api/tags",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   app:
     build:
       context: .
@@ -15,10 +38,12 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       HOSTNAME: 0.0.0.0
       PORT: "3000"
+      WHISPER_MODEL: "small"
       TMPDIR: ${APP_TMP_DIR:-/app/data/tmp}
       PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-/app/data/ms-playwright}
       npm_config_cache: ${NPM_CONFIG_CACHE:-/app/data/npm-cache}
       XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/app/data/.cache}
+      CLIPROXY_API_BASE_URL: ${CLIPROXY_API_BASE_URL:-http://cli-proxy-api:8317/v1}
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
     volumes:
@@ -53,6 +78,29 @@ services:
     networks:
       - eggent_default
       - nginx-proxy-manager_default
+
+  cli-proxy-api:
+    image: ${CLI_PROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    pull_policy: always
+    container_name: cli-proxy-api
+    restart: unless-stopped
+    init: true
+    environment:
+      DEPLOY: ${CLI_PROXY_DEPLOY:-}
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - ${CLI_PROXY_CONFIG_PATH:-./data/cliproxy/config.yaml}:/CLIProxyAPI/config.yaml
+      - ${CLI_PROXY_AUTH_PATH:-./data/cliproxy/auths}:/root/.cli-proxy-api
+      - ${CLI_PROXY_LOG_PATH:-./data/cliproxy/logs}:/CLIProxyAPI/logs
+      - ${CLI_PROXY_PLUGIN_PATH:-./data/cliproxy/plugins}:/CLIProxyAPI/plugins
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - eggent_default
 
 networks:
   eggent_default:

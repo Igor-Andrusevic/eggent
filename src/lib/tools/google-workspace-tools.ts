@@ -401,3 +401,187 @@ export async function calendarDeleteEvent(eventId: string): Promise<string> {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
+
+// ============================================================
+// Google Tasks tools
+// ============================================================
+
+async function resolveTaskListId(tasklistId: string): Promise<string> {
+  if (tasklistId && tasklistId !== "@default") {
+    return tasklistId;
+  }
+
+  const auth = await ensureAuthenticatedClient();
+  const tasks = google.tasks({ version: "v1", auth });
+  const res = await tasks.tasklists.list({ maxResults: 100 });
+
+  const list = res.data.items?.find(
+    (tl) => tl.title === "My Tasks" || tl.title === "Мои задачи" || tl.title === "Мой список задач",
+  );
+
+  if (list?.id) {
+    return list.id;
+  }
+
+  if (res.data.items?.[0]?.id) {
+    return res.data.items[0].id;
+  }
+
+  throw new Error("No task lists found. Create one in Google Tasks first.");
+}
+
+export async function tasksListTasklists(): Promise<string> {
+  try {
+    const auth = await ensureAuthenticatedClient();
+    const tasks = google.tasks({ version: "v1", auth });
+
+    const res = await tasks.tasklists.list({ maxResults: 100 });
+    const tasklists = res.data.items ?? [];
+
+    if (tasklists.length === 0) {
+      return "No task lists found.";
+    }
+
+    const results = tasklists.map((tl, i) =>
+      `[${i + 1}] ${tl.title} (ID: ${tl.id})`
+    );
+
+    return `Found ${tasklists.length} task list(s):\n\n${results.join("\n")}`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export async function tasksGetTasks(
+  tasklistId: string,
+  showCompleted: boolean,
+  showHidden: boolean,
+  maxResults: number,
+): Promise<string> {
+  try {
+    const resolvedId = await resolveTaskListId(tasklistId);
+    const auth = await ensureAuthenticatedClient();
+    const tasks = google.tasks({ version: "v1", auth });
+
+    const res = await tasks.tasks.list({
+      tasklist: resolvedId,
+      showCompleted,
+      showHidden,
+      maxResults,
+    });
+
+    const items = res.data.items ?? [];
+
+    if (items.length === 0) {
+      return "No tasks found in this list.";
+    }
+
+    const results = items.map((task, i) => {
+      const isCompleted = task.status === "completed";
+      const marker = isCompleted ? "✅" : "⬜";
+      const title = task.title ?? "(no title)";
+      const due = task.due ? ` | Due: ${task.due}` : "";
+      const notes = task.notes ? ` | Notes: ${task.notes.substring(0, 100)}` : "";
+
+      return `[${i + 1}] ${marker} ${title}\n    ID: ${task.id}${due}${notes}`;
+    });
+
+    return `Found ${items.length} task(s):\n\n${results.join("\n\n")}`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export async function tasksCreate(
+  tasklistId: string,
+  title: string,
+  due?: string,
+  notes?: string,
+): Promise<string> {
+  try {
+    const resolvedId = await resolveTaskListId(tasklistId);
+    const auth = await ensureAuthenticatedClient();
+    const tasks = google.tasks({ version: "v1", auth });
+
+    const requestBody: Record<string, unknown> = { title };
+
+    if (due) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+        requestBody.due = `${due}T00:00:00.000Z`;
+      } else if (/^\d{4}-\d{2}-\d{2}T/.test(due)) {
+        requestBody.due = due;
+      }
+    }
+
+    const aiNote = "Created by Eggent AI";
+    requestBody.notes = notes ? `${notes}\n\n${aiNote}` : aiNote;
+
+    const res = await tasks.tasks.insert({
+      tasklist: resolvedId,
+      requestBody: requestBody as any,
+    });
+
+    return `Задача '${res.data.title}' успешно создана\nID: ${res.data.id}${res.data.due ? `\nСрок: ${res.data.due}` : ""}`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export async function tasksPatch(
+  tasklistId: string,
+  taskId: string,
+  status?: string,
+  title?: string,
+  due?: string,
+): Promise<string> {
+  try {
+    const resolvedId = await resolveTaskListId(tasklistId);
+    const auth = await ensureAuthenticatedClient();
+    const tasks = google.tasks({ version: "v1", auth });
+
+    const requestBody: Record<string, unknown> = {};
+
+    if (status) requestBody.status = status;
+    if (title) requestBody.title = title;
+    if (due !== undefined) {
+      if (!due) {
+        requestBody.due = null;
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+        requestBody.due = `${due}T00:00:00.000Z`;
+      } else {
+        requestBody.due = due;
+      }
+    }
+
+    const res = await tasks.tasks.patch({
+      tasklist: resolvedId,
+      task: taskId,
+      requestBody: requestBody as any,
+    });
+
+    const actionText = status === "completed" ? "выполнена" : "обновлена";
+    return `Задача '${res.data.title}' успешно ${actionText}`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export async function tasksDelete(
+  tasklistId: string,
+  taskId: string,
+): Promise<string> {
+  try {
+    const resolvedId = await resolveTaskListId(tasklistId);
+    const auth = await ensureAuthenticatedClient();
+    const tasks = google.tasks({ version: "v1", auth });
+
+    await tasks.tasks.delete({
+      tasklist: resolvedId,
+      task: taskId,
+    });
+
+    return `Задача успешно удалена`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}

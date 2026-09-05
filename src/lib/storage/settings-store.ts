@@ -29,9 +29,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxTokens: 2048,
   },
   embeddingsModel: {
-    provider: "openai",
-    model: "text-embedding-3-small",
-    dimensions: 1536,
+    provider: "ollama",
+    model: "nomic-embed-text",
+    dimensions: 768,
+    baseUrl: "http://ollama:11434/v1",
   },
   codeExecution: {
     enabled: true,
@@ -58,12 +59,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
     passwordHash: DEFAULT_AUTH_PASSWORD_HASH,
     mustChangeCredentials: true,
   },
+  transcription: {
+    provider: "whisper-local",
+  },
   googleWorkspace: {
     enabled: false,
     clientId: "",
     clientSecret: "",
     gmailEnabled: true,
     calendarEnabled: true,
+    tasksEnabled: true,
   },
   apiKeysByProvider: {},
 };

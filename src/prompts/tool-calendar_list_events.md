@@ -1,26 +1,24 @@
 # Google Calendar List Events
 
-List events from Google Calendar within a date range.
+Показать события из Google Calendar в заданном диапазоне дат.
 
 ## When to Use
-- User asks about their schedule
-- User wants to see upcoming events
-- User needs to check availability
-- User asks "what's on my calendar?"
+- Пользователь хочет посмотреть предстоящие события
+- Пользователь спрашивает "что у меня в календаре?"
+- Нужно найти `event_id` для обновления или удаления
 
 ## Parameters
-- `time_min`: Start of range (ISO 8601 format, defaults to now)
-- `time_max`: End of range (ISO 8601 format, defaults to 7 days from now)
-- `max_results`: Maximum events to return (default 20)
+- `time_min`: Начало диапазона ISO 8601 в UTC (по умолчанию: сейчас)
+- `time_max`: Конец диапазона ISO 8601 в UTC (по умолчанию: +7 дней)
+- `max_results`: Максимум событий (по умолчанию 20)
 
-## Date Format
-Use ISO 8601 format: `2024-01-15T10:30:00Z` or include timezone offset
+## КРИТИЧЕСКИ ВАЖНО — Время
+- Все параметры времени передаются в UTC с суффиксом `Z`
+- Пример: `time_min: "2026-07-05T00:00:00Z"`, `time_max: "2026-07-12T23:59:59Z"`
 
 ## Best Practices
-- Default 7-day window is good for weekly overview
-- For specific days, set time_min to start of day, time_max to end of day
-- Present events chronologically with clear time formatting
-- Note all-day events separately from timed events
+- Выводи события в хронологическом порядке
+- Различай события на весь день и с точным временем
+- Показывай время в локальном часовом поясе пользователя и в UTC
 
-## Return Format
-Returns events with: id, summary, start/end times, location, attendees, status.
+Возвращает: id, название, время начала/конца, место, участников, статус.
