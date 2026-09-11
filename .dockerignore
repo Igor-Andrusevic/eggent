@@ -11,3 +11,8 @@ yarn-debug.log*
 yarn-error.log*
 tsconfig.tsbuildinfo
 .DS_Store
+.env
+.env*
+*.key
+*.pem
+credentials*.json

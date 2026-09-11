@@ -1004,7 +1004,7 @@ function buildMissingFinalResponseFallback(options: {
   const lastToolResult = getLastNonResponseToolResult(responseMessages);
   const streamErrorText = formatStreamErrorForUser(streamErrorMessage);
   const fallbackLines: string[] = [
-    "Tool execution finished, but I could not produce a final response for this turn.",
+    "Инструменты выполнились, но не удалось сформировать финальный ответ. Напишите `continue`, и я завершу ответ.",
   ];
 
   if (streamErrorText) {
@@ -1576,6 +1576,8 @@ export async function runAgentText(options: {
         ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
         : "";
     const finalText = text.trim() ? text : fallbackReply;
+    const safeFinalText =
+      finalText.trim() || "Не удалось сформировать ответ. Попробуйте повторить запрос.";
 
     try {
       const latest = await getChat(options.chatId);
@@ -1596,7 +1598,7 @@ export async function runAgentText(options: {
           latest.messages.push({
             id: crypto.randomUUID(),
             role: "assistant",
-            content: finalText,
+            content: safeFinalText,
             createdAt: now,
           });
         }
@@ -1614,7 +1616,7 @@ export async function runAgentText(options: {
       reason: "agent_turn_finished",
     });
 
-    return finalText;
+    return safeFinalText;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const is400Error = errorMessage.includes("400") || errorMessage.includes("Bad Request");
@@ -1772,7 +1774,7 @@ export async function runSubordinateAgent(options: {
   });
 
   try {
-    const { text } = await generateText({
+    const generated = await generateText({
       model,
       system: systemPrompt,
       messages,
@@ -1782,7 +1784,18 @@ export async function runSubordinateAgent(options: {
       temperature: settings.chatModel.temperature ?? 0.7,
       maxOutputTokens: settings.chatModel.maxTokens ?? 4096,
     });
-    return text;
+
+    const responseMessages = (
+      generated as unknown as { response?: { messages?: ModelMessage[] } }
+    ).response?.messages;
+
+    const text = generated.text ?? "";
+    const fallbackReply =
+      Array.isArray(responseMessages) && responseMessages.length > 0
+        ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
+        : "";
+    const finalText = text.trim() ? text : fallbackReply;
+    return finalText.trim() || "Subordinate agent did not produce a response.";
   } finally {
     if (mcpCleanupSub) {
       try {

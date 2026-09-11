@@ -338,10 +338,13 @@ export async function handleExternalMessage(
     ? await getProject(activeProjectId)
     : null;
 
+  const safeReply =
+    reply.trim() || "Не удалось сформировать ответ. Попробуйте повторить запрос.";
+
   return {
     success: true,
     sessionId: session.id,
-    reply,
+    reply: safeReply,
     context: {
       activeProjectId,
       activeProjectName: activeProject?.name ?? null,

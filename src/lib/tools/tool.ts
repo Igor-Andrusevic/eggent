@@ -542,6 +542,7 @@ export async function createAgentTools(
     inputSchema: z.object({
       message: z
         .string()
+        .min(1, "Response message must not be empty")
         .describe("Your final response message to the user in markdown format"),
     }),
     execute: async ({ message }) => {

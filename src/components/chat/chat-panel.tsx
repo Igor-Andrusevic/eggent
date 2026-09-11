@@ -493,7 +493,10 @@ export function ChatPanel() {
     }
 
     if (status === "ready" || status === "error") {
-      if (hasToolOutput && !hasVisibleAssistantAnswer) {
+      const hasMissingAnswer =
+        (hasToolOutput && !hasVisibleAssistantAnswer) ||
+        (assistantMessages.length > 0 && !hasVisibleAssistantAnswer);
+      if (hasMissingAnswer) {
         const alreadyPresent = assistantMessages.some(
           (m) => extractVisibleAssistantText(m) === NO_FINAL_RESPONSE_FALLBACK
         );

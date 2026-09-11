@@ -59,6 +59,10 @@ export const MODEL_PROVIDERS: Record<string, ProviderConfig> = {
       { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
     ],
     envKey: "GOOGLE_API_KEY",
+    embeddingModels: [
+      { id: "gemini-embedding-001", name: "Gemini Embedding 001", dimensions: 3072 },
+      { id: "gemini-embedding-2-preview", name: "Gemini Embedding 2 Preview", dimensions: 3072 },
+    ],
     requiresApiKey: true,
     authMethods: ["api_key"],
     defaultAuthMethod: "api_key",

@@ -1,29 +1,6 @@
 name: eggent
 
 services:
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    init: true
-    environment:
-      OLLAMA_KEEP_ALIVE: "24h"
-    volumes:
-      - ./data/ollama:/root/.ollama
-    networks:
-      - eggent_default
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "http://127.0.0.1:11434/api/tags",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
   app:
     build:
       context: .
@@ -57,7 +34,14 @@ services:
       - /var/log:/host/var/log:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      resources:
+        limits:
+          memory: 2500M
+          pids: 512
+        reservations:
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -85,6 +69,15 @@ services:
     container_name: cli-proxy-api
     restart: unless-stopped
     init: true
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+        reservations:
+          memory: 64M
     environment:
       DEPLOY: ${CLI_PROXY_DEPLOY:-}
     ports:

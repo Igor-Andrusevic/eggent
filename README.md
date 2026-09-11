@@ -377,6 +377,37 @@ Dockerfile          # Multi-stage production-сборка
 - Архив релизов: [docs/releases/README.md](./docs/releases/README.md)
 - Последний upstream-релиз: [v0.1.5 — Web Fetch for Direct Links](./docs/releases/0.1.5-web-fetch-direct-links.md)
 
+## Безопасность и обслуживание сервера (Аудит 2026-09-07)
+
+Сжатая сводка проведённых работ по безопасности инфраструктуры:
+
+- **CLI Proxy & TLS:**
+  - Внешний доступ защищён TLS через Nginx Proxy Manager (`https://cliproxy.takeshi-n8n.eu`, Let's Encrypt).
+  - Внутренний трафик `Eggent ↔ CLIProxy` изолирован в Docker bridge (plain HTTP, без выхода в интернет).
+- **Сетевой периметр & Firewall:**
+  - **Postfix (порт 25):** переведён в `inet_interfaces = loopback-only` (внешний приём почты закрыт, локальная отправка работает).
+  - **UFW:** активен, открыты только порты `22/tcp` (SSH), `80/tcp` (HTTP), `443/tcp` (HTTPS). Порт 3000 извне закрыт.
+  - **Fail2ban:** проверен и активен (jail `sshd`, бан brute-force IP).
+- **Hardening контейнеров (docker-compose):**
+  - Docker socket в `eggent-app` переведён в read-only (`/var/run/docker.sock:ro`).
+  - Добавлены лимиты ресурсов: `eggent-app` (RAM 2.5G, pids 512), `cli-proxy-api` (RAM 512M, pids 128).
+  - В `cli-proxy-api` включён `no-new-privileges:true`.
+  - В `.dockerignore` добавлены маски секретов (`.env*`, `*.key`, `*.pem`, `credentials*.json`).
+- **Секреты и права доступа:**
+  - Права `600` на `~/.config/last30days/.env`, `data/cliproxy/config.yaml` и `data/cliproxy/auths/*.json`.
+  - Удалены старые логи с API-ключами (`data/cliproxy/logs/error-*.log` и кэши VS Code).
+  - Скрипт `backup-eggent.sh` пропатчен (сохраняет права `600` на auth-файлы).
+  - Скрипты с sudo-паролями защищены правами `700`.
+- **Пользователь мониторинга `smotrini`:**
+  - Сохранён в группе `docker` для сбора метрик и отправки отчётов в Telegram.
+  - Shell переведён на `/usr/sbin/nologin` (интерактивный вход заблокирован).
+- **Очистка и обновления:**
+  - Удалены 22 неиспользуемых анонимных volume и старые слои образов.
+  - NPM обновлён с v2.14.0 до v2.15.1 с бэкапом базы `database.sqlite`.
+  - Отключены дублирующие задания бэкапа в root crontab (сохранён бэкап `root-crontab.backup`).
+  - Удалены дубликаты архивов данных в `docker-volumes/` и 139 устаревших файлов `packages_*.txt`.
+  - Свободное место на диске увеличено до **12 GB** (занятость снижена с 86% до **69%**).
+
 ## Участие и поддержка
 
 - Руководство для контрибьюторов: [CONTRIBUTING.md](./CONTRIBUTING.md)

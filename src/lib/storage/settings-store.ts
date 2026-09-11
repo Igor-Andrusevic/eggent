@@ -29,10 +29,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxTokens: 2048,
   },
   embeddingsModel: {
-    provider: "ollama",
-    model: "nomic-embed-text",
-    dimensions: 768,
-    baseUrl: "http://ollama:11434/v1",
+    provider: "google",
+    model: "gemini-embedding-001",
+    dimensions: 3072,
+    baseUrl: "",
   },
   codeExecution: {
     enabled: true,

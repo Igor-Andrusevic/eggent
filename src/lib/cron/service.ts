@@ -736,9 +736,12 @@ async function executeCronJob(job: CronJob): Promise<RunResult> {
         : await runPromise;
 
     const summary = output.trim();
+    if (!summary) {
+      console.warn(`[Cron] Job "${job.name}" produced empty output.`);
+    }
     return await deliverToTelegram({
       status: summary ? "ok" : "skipped",
-      summary: summary || undefined,
+      summary: summary || "Задание выполнилось, но не сформировало ответ.",
       startedAt,
       endedAt: Date.now(),
     });
