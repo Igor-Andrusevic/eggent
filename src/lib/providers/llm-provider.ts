@@ -1599,6 +1599,165 @@ function createDeepseekFetchWrapper(): typeof fetch {
   };
 }
 
+function isQuotaOrModelError(status: number, errorText: string): boolean {
+  if (status === 429 || status === 404 || status === 503) return true;
+  const lower = errorText.toLowerCase();
+  return (
+    lower.includes("quota") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("model_cooldown") ||
+    lower.includes("rate limit") ||
+    lower.includes("cooling down") ||
+    lower.includes("not available") ||
+    lower.includes("overloaded")
+  );
+}
+
+const DEFAULT_CLIPROXY_FALLBACK_CHAIN = [
+  "claude-opus-4-6-thinking",
+  "claude-opus-5-5-high",
+  "claude-sonnet-4-6",
+  "gemini-3.8-flash-high",
+  "gemini-3.7-flash-high",
+  "deepseek-v4-flash",
+];
+
+let cliproxyModelsCache: { models: string[]; expiresAt: number } | null = null;
+const CLIPROXY_CACHE_TTL_MS = 60_000;
+
+async function getCachedCliproxyModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  const now = Date.now();
+  if (cliproxyModelsCache && cliproxyModelsCache.expiresAt > now && cliproxyModelsCache.models.length > 0) {
+    return cliproxyModelsCache.models;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const headers: Record<string, string> = {};
+    if (apiKey.trim()) {
+      headers.Authorization = `Bearer ${apiKey.trim()}`;
+    }
+
+    const res = await fetch(`${baseUrl}/models`, {
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json() as Record<string, unknown>;
+      let rawList: unknown[] = [];
+      if (Array.isArray(data)) {
+        rawList = data;
+      } else if (data && typeof data === "object" && Array.isArray(data.data)) {
+        rawList = data.data;
+      } else if (data && typeof data === "object" && Array.isArray(data.models)) {
+        rawList = data.models;
+      }
+
+      const parsed = rawList
+        .map((item) => {
+          if (!item || typeof item !== "object") return "";
+          const record = item as Record<string, unknown>;
+          return typeof record.id === "string" ? record.id : typeof record.name === "string" ? record.name : "";
+        })
+        .filter((id) => Boolean(id));
+
+      if (parsed.length > 0) {
+        cliproxyModelsCache = { models: parsed, expiresAt: now + CLIPROXY_CACHE_TTL_MS };
+        return parsed;
+      }
+    }
+  } catch {
+    // CLIProxy /models request failed or timed out — fallback to static list
+  }
+
+  return DEFAULT_CLIPROXY_FALLBACK_CHAIN;
+}
+
+async function readResponseErrorTextWithTimeout(response: Response, timeoutMs = 2500): Promise<string> {
+  try {
+    const cloned = response.clone();
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(""), timeoutMs);
+    });
+    const textPromise = cloned.text().then((text) => {
+      if (timer) clearTimeout(timer);
+      return text;
+    });
+    return await Promise.race([textPromise, timeoutPromise]);
+  } catch {
+    return "";
+  }
+}
+
+function createCliProxyFetchWrapper(baseUrl?: string, apiKey = ""): typeof fetch {
+  const resolvedBaseUrl = baseUrl || process.env.CLIPROXY_API_BASE_URL || "http://127.0.0.1:8317/v1";
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (init?.method !== "POST" || !init.body) {
+      return fetch(input, init);
+    }
+
+    let parsedBody: Record<string, unknown>;
+    try {
+      parsedBody = JSON.parse(init.body as string);
+    } catch {
+      return fetch(input, init);
+    }
+
+    const requestedModel = typeof parsedBody.model === "string" ? parsedBody.model : "";
+    if (!requestedModel) {
+      return fetch(input, init);
+    }
+
+    const chain = await getCachedCliproxyModels(resolvedBaseUrl, apiKey);
+    const candidateModels = [
+      requestedModel,
+      ...chain.filter((m) => m !== requestedModel),
+    ];
+
+    let lastResponse: Response | null = null;
+    let lastErrorText = "";
+
+    for (const currentModel of candidateModels) {
+      const currentBody = { ...parsedBody, model: currentModel };
+      const currentInit = { ...init, body: JSON.stringify(currentBody) };
+
+      try {
+        const response = await fetch(input, currentInit);
+        if (response.ok) {
+          if (currentModel !== requestedModel) {
+            console.warn(
+              `[CLIProxy Fallback] Original model "${requestedModel}" unavailable (${lastErrorText.slice(0, 80)}). Switched to fallback model "${currentModel}".`
+            );
+          }
+          return response;
+        }
+
+        const text = await readResponseErrorTextWithTimeout(response);
+        lastErrorText = text;
+        lastResponse = response;
+
+        if (isQuotaOrModelError(response.status, text)) {
+          console.warn(
+            `[CLIProxy Fallback] Model "${currentModel}" failed with status ${response.status} (quota/cooldown). Trying next fallback...`
+          );
+          continue;
+        }
+
+        return response;
+      } catch (networkError) {
+        lastErrorText = networkError instanceof Error ? networkError.message : String(networkError);
+        console.warn(`[CLIProxy Fallback] Network error on "${currentModel}": ${lastErrorText}. Trying next fallback...`);
+      }
+    }
+
+    return lastResponse || fetch(input, init);
+  };
+}
+
 function createOpenAICompatibleChatModel(
   config: ModelConfig,
   settings: OpenAICompatibleSettings
@@ -1608,6 +1767,7 @@ function createOpenAICompatibleChatModel(
   );
   const dropAuthorization = settings.allowMissingApiKey === true && !settings.apiKey.trim();
   const fetchWrapper =
+    settings.providerName === "cliproxy" ? createCliProxyFetchWrapper(baseURL, settings.apiKey || "") :
     settings.providerName === "zhipuai" ? createZhipuaiFetchWrapper() :
     settings.providerName === "deepseek" ? createDeepseekFetchWrapper() :
     createOpenAICompatibleFetch(dropAuthorization);
