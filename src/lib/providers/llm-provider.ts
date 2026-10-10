@@ -22,6 +22,8 @@ import {
   loadProjectMcpServers,
 } from "@/lib/storage/project-store";
 import { resolveCliOAuthCredentialSync } from "@/lib/providers/provider-auth";
+import { modelCircuitBreaker } from "@/lib/providers/circuit-breaker";
+import { notifyAdmin } from "@/lib/notifications/admin-notify";
 
 type OpenAICompatibleSettings = {
   providerName: string;
@@ -1713,21 +1715,28 @@ function createCliProxyFetchWrapper(baseUrl?: string, apiKey = ""): typeof fetch
     }
 
     const chain = await getCachedCliproxyModels(resolvedBaseUrl, apiKey);
-    const candidateModels = [
+    const rawCandidates = [
       requestedModel,
       ...chain.filter((m) => m !== requestedModel),
+    ];
+    // Circuit breaker prioritization: try available models first, deprioritize open circuits
+    const candidateModels = [
+      ...rawCandidates.filter((m) => modelCircuitBreaker.isAvailable(`cliproxy:${m}`)),
+      ...rawCandidates.filter((m) => !modelCircuitBreaker.isAvailable(`cliproxy:${m}`)),
     ];
 
     let lastResponse: Response | null = null;
     let lastErrorText = "";
 
     for (const currentModel of candidateModels) {
+      const breakerKey = `cliproxy:${currentModel}`;
       const currentBody = { ...parsedBody, model: currentModel };
       const currentInit = { ...init, body: JSON.stringify(currentBody) };
 
       try {
         const response = await fetch(input, currentInit);
         if (response.ok) {
+          modelCircuitBreaker.recordSuccess(breakerKey);
           if (currentModel !== requestedModel) {
             console.warn(
               `[CLIProxy Fallback] Original model "${requestedModel}" unavailable (${lastErrorText.slice(0, 80)}). Switched to fallback model "${currentModel}".`
@@ -1741,6 +1750,7 @@ function createCliProxyFetchWrapper(baseUrl?: string, apiKey = ""): typeof fetch
         lastResponse = response;
 
         if (isQuotaOrModelError(response.status, text)) {
+          modelCircuitBreaker.recordFailure(breakerKey, `HTTP ${response.status}: ${text.slice(0, 60)}`);
           console.warn(
             `[CLIProxy Fallback] Model "${currentModel}" failed with status ${response.status} (quota/cooldown). Trying next fallback...`
           );
@@ -1750,9 +1760,15 @@ function createCliProxyFetchWrapper(baseUrl?: string, apiKey = ""): typeof fetch
         return response;
       } catch (networkError) {
         lastErrorText = networkError instanceof Error ? networkError.message : String(networkError);
+        modelCircuitBreaker.recordFailure(breakerKey, `Network error: ${lastErrorText}`);
         console.warn(`[CLIProxy Fallback] Network error on "${currentModel}": ${lastErrorText}. Trying next fallback...`);
       }
     }
+
+    // All fallback models in CLIProxy exhausted — notify admin
+    void notifyAdmin(
+      `Все модели в цепочке CLIProxy исчерпаны!\nЗапрошенная: <code>${requestedModel}</code>\nПоследняя ошибка: ${lastErrorText.slice(0, 200)}`
+    );
 
     return lastResponse || fetch(input, init);
   };

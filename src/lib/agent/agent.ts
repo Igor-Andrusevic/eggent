@@ -18,6 +18,9 @@ import type { AgentContext } from "@/lib/agent/types";
 import { History } from "@/lib/agent/history";
 import type { ChatMessage, ModelConfig } from "@/lib/types";
 import { publishUiSyncEvent } from "@/lib/realtime/event-bus";
+import { isRetriableProviderError } from "@/lib/agent/error-utils";
+import { modelCircuitBreaker } from "@/lib/providers/circuit-breaker";
+import { notifyAdmin } from "@/lib/notifications/admin-notify";
 
 const LLM_LOG_BORDER = "═".repeat(60);
 const MAX_TOOL_STEPS_PER_TURN = 100;
@@ -1293,11 +1296,16 @@ export async function runAgent(options: {
       streamErrorMessage = error instanceof Error ? error.message : String(error);
       console.error("Agent stream error:", error);
 
+      const breakerKey = `${settings.chatModel.provider}:${settings.chatModel.model}`;
+      modelCircuitBreaker.recordFailure(breakerKey, streamErrorMessage.slice(0, 80));
+
       if (onErrorPersistScheduled) return;
       onErrorPersistScheduled = true;
 
       const is400Error = streamErrorMessage.includes("400") || streamErrorMessage.includes("Bad Request");
-      
+      const isRetriable = isRetriableProviderError(error);
+
+      // Branch 1: 400 error retry with truncated history
       if (is400Error && context.history.length > 10) {
         console.warn(`[runAgent] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
         
@@ -1327,6 +1335,7 @@ export async function runAgent(options: {
           const retryToolText = getLastResponseToolText(retryResponseMessages);
           const retryFinalText = retryText.trim() || retryToolText.trim() || "Извините, произошла ошибка. Попробуйте отправить сообщение ещё раз.";
 
+          modelCircuitBreaker.recordSuccess(breakerKey);
           await cleanupMcpIfNeeded();
           persistedByOnError = true;
 
@@ -1343,9 +1352,105 @@ export async function runAgent(options: {
           });
           return;
         } catch (retryError) {
-          console.error("[runAgent] Retry also failed:", retryError);
+          console.error("[runAgent] 400 Retry also failed:", retryError);
         }
       }
+
+      // Branch 2: Retriable error (429, 500+, timeout, quota) -> retry with backoff and fallback model
+      if (isRetriable) {
+        console.warn(`[runAgent] Retriable stream error (${streamErrorMessage.slice(0, 80)}). Attempting recovery via generateText...`);
+
+        // Check if utilityModel is different and available
+        const hasFallbackModel =
+          Boolean(settings.utilityModel?.model) &&
+          (settings.utilityModel.model !== settings.chatModel.model ||
+            settings.utilityModel.provider !== settings.chatModel.provider);
+
+        const fallbackModelConfig = hasFallbackModel ? settings.utilityModel : null;
+        const fallbackBreakerKey = fallbackModelConfig
+          ? `${fallbackModelConfig.provider}:${fallbackModelConfig.model}`
+          : "";
+
+        const recoveryCandidates: Array<{
+          cfg: ModelConfig;
+          m: typeof model;
+          key: string;
+        }> = [];
+
+        // Try primary model again with short delay if circuit is not fully open
+        if (modelCircuitBreaker.isAvailable(breakerKey)) {
+          recoveryCandidates.push({ cfg: settings.chatModel, m: model, key: breakerKey });
+        }
+
+        // Add utility model fallback
+        if (fallbackModelConfig) {
+          try {
+            const fallbackM = createModel(fallbackModelConfig, {
+              projectId: options.projectId,
+              currentPath: options.currentPath,
+            });
+            recoveryCandidates.push({ cfg: fallbackModelConfig, m: fallbackM, key: fallbackBreakerKey });
+          } catch (modelErr) {
+            console.warn("[runAgent] Failed to create fallback utility model:", modelErr);
+          }
+        }
+
+        for (const candidate of recoveryCandidates) {
+          try {
+            console.warn(`[runAgent] Recovery attempt with model "${candidate.cfg.provider}:${candidate.cfg.model}"...`);
+            // Brief backoff delay
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+
+            const candidateProviderOptions = resolveModelProviderOptions(candidate.cfg.provider);
+            const recoveryResult = await generateText({
+              model: candidate.m,
+              system: systemPrompt,
+              messages,
+              providerOptions: candidateProviderOptions,
+              tools,
+              stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
+              temperature: candidate.cfg.temperature ?? 0.7,
+              maxOutputTokens: candidate.cfg.maxTokens ?? 4096,
+            });
+
+            const recoveryResponseMessages = (
+              recoveryResult as unknown as { response?: { messages?: ModelMessage[] } }
+            ).response?.messages || [];
+
+            const recText = recoveryResult.text || "";
+            const recToolText = getLastResponseToolText(recoveryResponseMessages);
+            const recFinalText = recText.trim() || recToolText.trim() || "Ответ сформирован через резервную модель.";
+
+            modelCircuitBreaker.recordSuccess(candidate.key);
+            await cleanupMcpIfNeeded();
+            persistedByOnError = true;
+
+            const persistResult = await persistAssistantTurn({
+              responseMessages: recoveryResponseMessages,
+              fallbackText: recFinalText,
+            });
+
+            publishUiSyncEvent({
+              topic: "chat",
+              projectId: options.projectId ?? null,
+              chatId: options.chatId,
+              reason: persistResult === "fallback" ? "agent_turn_retry_fallback" : "agent_turn_retry_success",
+            });
+            return;
+          } catch (recErr) {
+            modelCircuitBreaker.recordFailure(
+              candidate.key,
+              recErr instanceof Error ? recErr.message : String(recErr)
+            );
+            console.error(`[runAgent] Recovery with "${candidate.cfg.model}" failed:`, recErr);
+          }
+        }
+      }
+
+      // Notify administrator when all in-stream retries fail
+      void notifyAdmin(
+        `Сбой потока генерации в чате <code>${options.chatId}</code>\nМодель: <code>${settings.chatModel.provider}:${settings.chatModel.model}</code>\nОшибка: ${streamErrorMessage.slice(0, 200)}`
+      );
 
       setTimeout(async () => {
         if (streamFinished || persistedByOnError) return;
@@ -1386,6 +1491,9 @@ export async function runAgent(options: {
         typeof (event as unknown as { finishReason?: unknown }).finishReason === "string"
           ? ((event as unknown as { finishReason?: string }).finishReason as string)
           : undefined;
+
+      const breakerKey = `${settings.chatModel.provider}:${settings.chatModel.model}`;
+      modelCircuitBreaker.recordSuccess(breakerKey);
 
       const responseMessages = event.response.messages;
       const lastAssistantText = getLastAssistantText(responseMessages);
@@ -1616,11 +1724,105 @@ export async function runAgentText(options: {
       reason: "agent_turn_finished",
     });
 
+    modelCircuitBreaker.recordSuccess(`${effectiveModel.provider}:${effectiveModel.model}`);
     return safeFinalText;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const is400Error = errorMessage.includes("400") || errorMessage.includes("Bad Request");
+    const isRetriable = isRetriableProviderError(error);
+
+    const primaryBreakerKey = `${effectiveModel.provider}:${effectiveModel.model}`;
+    modelCircuitBreaker.recordFailure(primaryBreakerKey, errorMessage.slice(0, 80));
+
+    // Branch 1: Retriable error -> attempt with fallback utilityModel
+    const hasFallbackModel =
+      Boolean(settings.utilityModel?.model) &&
+      (settings.utilityModel.model !== effectiveModel.model ||
+        settings.utilityModel.provider !== effectiveModel.provider);
+
+    if (isRetriable && hasFallbackModel) {
+      const fallbackConfig = settings.utilityModel;
+      const fallbackBreakerKey = `${fallbackConfig.provider}:${fallbackConfig.model}`;
+
+      if (modelCircuitBreaker.isAvailable(fallbackBreakerKey)) {
+        console.warn(
+          `[runAgentText] Primary model "${primaryBreakerKey}" failed (${errorMessage.slice(0, 80)}). Falling back to utility model "${fallbackBreakerKey}"...`
+        );
+
+        try {
+          const fallbackModel = createModel(fallbackConfig, {
+            projectId: options.projectId,
+            currentPath: options.currentPath,
+          });
+          const fallbackProviderOptions = resolveModelProviderOptions(fallbackConfig.provider);
+
+          const generated = await generateText({
+            model: fallbackModel,
+            system: systemPrompt,
+            messages,
+            providerOptions: fallbackProviderOptions,
+            tools,
+            stopWhen: [stepCountIs(MAX_TOOL_STEPS_PER_TURN), hasToolCall("response")],
+            temperature: fallbackConfig.temperature ?? 0.7,
+            maxOutputTokens: fallbackConfig.maxTokens ?? 4096,
+          });
+
+          const responseMessages = (
+            generated as unknown as { response?: { messages?: ModelMessage[] } }
+          ).response?.messages;
+
+          const text = generated.text ?? "";
+          const fallbackReply =
+            Array.isArray(responseMessages) && responseMessages.length > 0
+              ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
+              : "";
+          const finalText = text.trim() ? text : fallbackReply;
+
+          modelCircuitBreaker.recordSuccess(fallbackBreakerKey);
+
+          try {
+            const latest = await getChat(options.chatId);
+            if (latest) {
+              const now = new Date().toISOString();
+              latest.messages.push({
+                id: crypto.randomUUID(),
+                role: "user",
+                content: options.userMessage,
+                createdAt: now,
+              });
+
+              if (Array.isArray(responseMessages) && responseMessages.length > 0) {
+                for (const msg of responseMessages) {
+                  latest.messages.push(...convertModelMessageToChatMessages(msg, now));
+                }
+              } else {
+                latest.messages.push({
+                  id: crypto.randomUUID(),
+                  role: "assistant",
+                  content: finalText,
+                  createdAt: now,
+                });
+              }
+
+              latest.updatedAt = now;
+              await saveChat(latest);
+            }
+          } catch {
+            // Non-critical
+          }
+
+          return finalText;
+        } catch (fallbackError) {
+          modelCircuitBreaker.recordFailure(
+            fallbackBreakerKey,
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          );
+          console.error(`[runAgentText] Fallback model "${fallbackBreakerKey}" also failed:`, fallbackError);
+        }
+      }
+    }
     
+    // Branch 2: 400 error retry with shorter history
     if (is400Error && context.history.length > 10) {
       console.warn(`[runAgentText] 400 error, retrying with shorter history (${context.history.length} -> 10)`);
       
@@ -1652,6 +1854,8 @@ export async function runAgentText(options: {
             ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
             : "";
         const finalText = text.trim() ? text : fallbackReply;
+
+        modelCircuitBreaker.recordSuccess(primaryBreakerKey);
 
         try {
           const latest = await getChat(options.chatId);
@@ -1687,10 +1891,18 @@ export async function runAgentText(options: {
         return finalText;
       } catch (retryError) {
         console.error("[runAgentText] Retry also failed:", retryError);
+        // Notify admin about complete failure
+        void notifyAdmin(
+          `Ошибка генерации (non-stream) в чате <code>${options.chatId}</code>\nМодель: <code>${primaryBreakerKey}</code>\nОшибка: ${errorMessage.slice(0, 200)}`
+        );
         throw retryError;
       }
     }
     
+    // Notify admin on unhandled non-400 failure
+    void notifyAdmin(
+      `Ошибка генерации (non-stream) в чате <code>${options.chatId}</code>\nМодель: <code>${primaryBreakerKey}</code>\nОшибка: ${errorMessage.slice(0, 200)}`
+    );
     throw error;
   } finally {
     if (mcpCleanup) {
