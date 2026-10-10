@@ -7,6 +7,7 @@ RUN npm install --no-package-lock
 
 FROM deps AS builder
 WORKDIR /app
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 COPY . .
 RUN npm run build
