@@ -25,6 +25,8 @@ import { notifyAdmin } from "@/lib/notifications/admin-notify";
 const LLM_LOG_BORDER = "═".repeat(60);
 const MAX_TOOL_STEPS_PER_TURN = 100;
 const MAX_TOOL_STEPS_SUBORDINATE = 15;
+const MAX_CONTINUATION_ROUNDS = 6;
+const MAX_CONTINUATION_STEPS = 25;
 const POLL_NO_PROGRESS_BLOCK_THRESHOLD = 16;
 const POLL_BACKOFF_SCHEDULE_MS = [5000, 10000, 30000, 60000] as const;
 
@@ -978,11 +980,108 @@ function getLastNonResponseToolResult(messages: ModelMessage[]): {
   return null;
 }
 
-function truncateForFallback(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
+function hasNonResponseToolResult(messages: ModelMessage[]): boolean {
+  return getLastNonResponseToolResult(messages) !== null;
+}
+
+interface ContinueAgentResult {
+  finalText: string;
+  extraMessages: ModelMessage[];
+  textMessage: string;
+}
+
+async function continueAgentToFinalResponse(options: {
+  model: Parameters<typeof streamText>[0]["model"];
+  systemPrompt: string;
+  messages: ModelMessage[];
+  responseMessages: ModelMessage[];
+  tools: ToolSet;
+  provider?: string;
+  providerOptions?: Parameters<typeof generateText>[0]["providerOptions"];
+  temperature?: number;
+  maxOutputTokens?: number;
+  maxExtraSteps?: number;
+  partialText?: string;
+}): Promise<ContinueAgentResult> {
+  try {
+    let cleanedHistory = cleanOrphanedToolMessages([
+      ...options.messages,
+      ...options.responseMessages,
+    ]);
+
+    if (options.provider === "google" || options.provider === "zhipuai") {
+      cleanedHistory = validateAndFixGeminiToolOrdering(cleanedHistory);
+    }
+
+    const partialText = (options.partialText || "").trim();
+    const instruction = partialText
+      ? "Твой предыдущий ответ был оборван. Продолжи ровно с места обрыва, не повторяя написанное ранее. Верни недостающую часть ответа и обязательно заверши ответ через вызов инструмента response с финальным понятным результатом."
+      : "Все предыдущие инструменты и действия уже выполнены либо продолжаются. Сформулируй и выдай исчерпывающий финальный ответ пользователю по результатам выполнения задачи через инструмент response или прямым текстом. Ни в коем случае не останавливайся без ответа и не проси пользователя писать continue.";
+
+    const maxSteps = options.maxExtraSteps ?? MAX_CONTINUATION_STEPS;
+
+    const result = await generateText({
+      model: options.model,
+      system: options.systemPrompt,
+      messages: [
+        ...cleanedHistory,
+        {
+          role: "user",
+          content: instruction,
+        },
+      ],
+      tools: options.tools,
+      stopWhen: [stepCountIs(maxSteps), hasToolCall("response")],
+      providerOptions: options.providerOptions,
+      temperature: options.temperature ?? 0.7,
+      maxOutputTokens: options.maxOutputTokens ?? 4096,
+    });
+
+    const extraMessages = (
+      result as unknown as { response?: { messages?: ModelMessage[] } }
+    ).response?.messages || [];
+
+    const responseToolText = getLastResponseToolText(extraMessages).trim();
+    const plainText = (result.text || "").trim();
+    const assistantText = getLastAssistantText(extraMessages).trim();
+
+    if (hasVisibleText(responseToolText)) {
+      return {
+        finalText: responseToolText,
+        extraMessages,
+        textMessage: "",
+      };
+    }
+
+    if (hasVisibleText(plainText)) {
+      return {
+        finalText: plainText,
+        extraMessages,
+        textMessage: plainText,
+      };
+    }
+
+    if (hasVisibleText(assistantText)) {
+      return {
+        finalText: assistantText,
+        extraMessages,
+        textMessage: assistantText,
+      };
+    }
+
+    return {
+      finalText: "",
+      extraMessages,
+      textMessage: "",
+    };
+  } catch (error) {
+    console.warn("continueAgentToFinalResponse failed:", error);
+    return {
+      finalText: "",
+      extraMessages: [],
+      textMessage: "",
+    };
   }
-  return `${value.slice(0, maxChars)}\n...[truncated]`;
 }
 
 function formatStreamErrorForUser(errorMessage: string): string {
@@ -1004,53 +1103,65 @@ function buildMissingFinalResponseFallback(options: {
   streamErrorMessage: string;
 }): string {
   const { responseMessages, streamErrorMessage } = options;
+  const lastAssistantText = getLastAssistantText(responseMessages);
+  if (hasVisibleText(lastAssistantText)) {
+    return lastAssistantText.trim();
+  }
+
   const lastToolResult = getLastNonResponseToolResult(responseMessages);
-  const streamErrorText = formatStreamErrorForUser(streamErrorMessage);
-  const fallbackLines: string[] = [
-    "Инструменты выполнились, но не удалось сформировать финальный ответ. Напишите `continue`, и я завершу ответ.",
-  ];
-
-  if (streamErrorText) {
-    fallbackLines.push(`Reason: ${streamErrorText}`);
-  }
-
-  if (lastToolResult?.toolName) {
-    fallbackLines.push(`Last tool: \`${lastToolResult.toolName}\``);
-  }
-
   if (lastToolResult?.text) {
-    fallbackLines.push(
-      [
-        "Last tool output (truncated):",
-        "```text",
-        truncateForFallback(lastToolResult.text, 1200),
-        "```",
-      ].join("\n")
-    );
+    const toolHeader = lastToolResult.toolName
+      ? `**Результат выполнения (${lastToolResult.toolName}):**\n\n`
+      : "";
+    return `${toolHeader}${lastToolResult.text.trim()}`;
   }
 
-  fallbackLines.push("Пожалуйста, подождите или отправьте уточнение.");
-  return fallbackLines.join("\n\n");
+  const streamErrorText = formatStreamErrorForUser(streamErrorMessage);
+  if (streamErrorText) {
+    return `Не удалось завершить ответ из-за ошибки: ${streamErrorText}`;
+  }
+
+  return "Не удалось сформировать финальный ответ. Попробуйте повторить запрос.";
 }
 
-function shouldAutoContinueAssistant(
+function detectIncompleteAnswer(
   text: string,
   finishReason?: string
-): boolean {
+): { incomplete: boolean; reason: string } {
   const trimmed = text.trim();
-  if (!trimmed) return false;
+  if (!trimmed) {
+    return { incomplete: false, reason: "" };
+  }
 
   const reason = (finishReason || "").toLowerCase();
+  // 1. Length cutoff from provider
   if (reason === "length" || reason === "max_tokens") {
-    return true;
+    return { incomplete: true, reason: "length_cutoff" };
   }
 
-  // Common abrupt cutoff pattern from prompt-generation turns.
-  if (/(?:here is (?:the )?prompt|вот (?:твой )?(?:промпт|prompt))[:：]?\s*$/i.test(trimmed)) {
-    return true;
+  // 2. Unclosed code block: odd number of triple-backticks
+  const codeFences = (trimmed.match(/```/g) || []).length;
+  if (codeFences % 2 !== 0) {
+    return { incomplete: true, reason: "unclosed_code_fence" };
   }
 
-  return false;
+  // 3. Abrupt cutoff pattern: ends mid-word / identifier without ending punctuation
+  // Only check if text is long enough (> 80 chars) to avoid false positives on short answers
+  if (trimmed.length > 80) {
+    // Common prompt abrupt cutoff
+    if (/(?:here is (?:the )?prompt|вот (?:твой )?(?:промпт|prompt))[:：]?\s*$/i.test(trimmed)) {
+      return { incomplete: true, reason: "abrupt_prompt_cutoff" };
+    }
+
+    // Ends mid-word or identifier character without closing punctuation or markdown closure
+    const endsWithIncompleteChar = /[A-Za-zА-Яа-я0-9_$[\]({:=+*/\\-]\s*$/.test(trimmed);
+    const endsWithTerminalPunctuation = /[.!?…:;»")`]\s*$/.test(trimmed);
+    if (endsWithIncompleteChar && !endsWithTerminalPunctuation) {
+      return { incomplete: true, reason: "abrupt_text_cutoff" };
+    }
+  }
+
+  return { incomplete: false, reason: "" };
 }
 
 /**
@@ -1457,20 +1568,55 @@ export async function runAgent(options: {
         persistedByOnError = true;
         await cleanupMcpIfNeeded();
 
-        const responseMessages = cleanOrphanedToolMessages(latestStepResponseMessages);
+        let responseMessages = cleanOrphanedToolMessages(latestStepResponseMessages);
         const responseToolText = getLastResponseToolText(responseMessages).trim();
         const lastAssistantText = getLastAssistantText(responseMessages);
-        const hasFinalText = hasVisibleText(lastAssistantText) || hasVisibleText(responseToolText);
+        let hasFinalText = hasVisibleText(lastAssistantText) || hasVisibleText(responseToolText);
 
-        const fallbackText = hasFinalText
-          ? ""
-          : buildMissingFinalResponseFallback({
+        let continuationText = "";
+        let fallbackText = "";
+
+        if (!hasFinalText && hasNonResponseToolResult(responseMessages)) {
+          for (let round = 0; round < MAX_CONTINUATION_ROUNDS; round++) {
+            const cont = await continueAgentToFinalResponse({
+              model,
+              systemPrompt,
+              messages,
               responseMessages,
-              streamErrorMessage,
+              tools,
+              provider: settings.chatModel.provider,
+              providerOptions,
+              temperature: settings.chatModel.temperature,
+              maxOutputTokens: settings.chatModel.maxTokens,
             });
+
+            if (cont.extraMessages.length > 0) {
+              responseMessages = [...responseMessages, ...cont.extraMessages];
+            }
+            if (hasVisibleText(cont.textMessage)) {
+              continuationText = continuationText
+                ? `${continuationText}\n${cont.textMessage}`
+                : cont.textMessage;
+            }
+
+            const currentResponseToolText = getLastResponseToolText(responseMessages).trim();
+            hasFinalText = hasVisibleText(continuationText) || hasVisibleText(currentResponseToolText);
+            if (hasFinalText) {
+              break;
+            }
+          }
+        }
+
+        if (!hasFinalText) {
+          fallbackText = buildMissingFinalResponseFallback({
+            responseMessages,
+            streamErrorMessage,
+          });
+        }
 
         const persistResult = await persistAssistantTurn({
           responseMessages,
+          continuationText,
           fallbackText,
         });
 
@@ -1479,9 +1625,11 @@ export async function runAgent(options: {
           projectId: options.projectId ?? null,
           chatId: options.chatId,
           reason:
-            persistResult === "fallback"
-              ? "agent_turn_stream_error_fallback"
-              : "agent_turn_stream_error_partial_saved",
+            persistResult === "continued"
+              ? "agent_turn_auto_continued"
+              : persistResult === "fallback"
+                ? "agent_turn_stream_error_fallback"
+                : "agent_turn_stream_error_partial_saved",
         });
       }, 1200);
     },
@@ -1495,42 +1643,70 @@ export async function runAgent(options: {
       const breakerKey = `${settings.chatModel.provider}:${settings.chatModel.model}`;
       modelCircuitBreaker.recordSuccess(breakerKey);
 
-      const responseMessages = event.response.messages;
+      let responseMessages: ModelMessage[] = event.response.messages;
       const lastAssistantText = getLastAssistantText(responseMessages);
       const responseToolText = getLastResponseToolText(responseMessages).trim();
       let continuationText = "";
       let fallbackText = "";
 
-      if (shouldAutoContinueAssistant(lastAssistantText, finishReason)) {
-        try {
-          const continuation = await generateText({
+      const primaryText = lastAssistantText || responseToolText;
+      const incompleteCheck = detectIncompleteAnswer(primaryText, finishReason);
+      const hasDirectAnswer = hasVisibleText(lastAssistantText) || hasVisibleText(responseToolText);
+      const needsContinuation = !hasDirectAnswer || incompleteCheck.incomplete;
+
+      if (needsContinuation) {
+        let accumulatedPartial = primaryText;
+        for (let round = 0; round < MAX_CONTINUATION_ROUNDS; round++) {
+          const cont = await continueAgentToFinalResponse({
             model,
-            system: systemPrompt,
-            messages: [
-              ...messages,
-              ...responseMessages,
-              {
-                role: "user",
-                content:
-                  "Continue your previous answer from exactly where it stopped. " +
-                  "Output only the continuation text, without repeating earlier content.",
-              },
-            ],
+            systemPrompt,
+            messages,
+            responseMessages,
+            tools,
+            provider: settings.chatModel.provider,
             providerOptions,
-            temperature: settings.chatModel.temperature ?? 0.7,
-            maxOutputTokens: Math.min(settings.chatModel.maxTokens ?? 4096, 1200),
+            temperature: settings.chatModel.temperature,
+            maxOutputTokens: settings.chatModel.maxTokens,
+            partialText: accumulatedPartial,
           });
-          continuationText = (continuation.text || "").trim();
-        } catch (error) {
-          console.warn("Auto-continuation failed:", error);
+
+          if (cont.extraMessages.length > 0) {
+            responseMessages = [...responseMessages, ...cont.extraMessages];
+          }
+
+          if (hasVisibleText(cont.textMessage)) {
+            continuationText = continuationText
+              ? `${continuationText}\n${cont.textMessage}`
+              : cont.textMessage;
+            accumulatedPartial = accumulatedPartial
+              ? `${accumulatedPartial}\n${cont.textMessage}`
+              : cont.textMessage;
+          }
+
+          const currentResponseToolText = getLastResponseToolText(responseMessages).trim();
+          const currentAssistantText = getLastAssistantText(responseMessages);
+          const currentCombined = continuationText || currentResponseToolText || currentAssistantText;
+
+          const recheck = detectIncompleteAnswer(currentCombined, undefined);
+          const hasResolvedAnswer =
+            hasVisibleText(continuationText) ||
+            hasVisibleText(currentResponseToolText) ||
+            hasVisibleText(currentAssistantText);
+
+          if (hasResolvedAnswer && !recheck.incomplete) {
+            break;
+          }
         }
       }
 
-      if (
-        !hasVisibleText(lastAssistantText) &&
-        !hasVisibleText(responseToolText) &&
-        !hasVisibleText(continuationText)
-      ) {
+      const finalResponseToolText = getLastResponseToolText(responseMessages).trim();
+      const finalAssistantText = getLastAssistantText(responseMessages);
+      const finalResolved =
+        hasVisibleText(finalAssistantText) ||
+        hasVisibleText(finalResponseToolText) ||
+        hasVisibleText(continuationText);
+
+      if (!finalResolved) {
         fallbackText = buildMissingFinalResponseFallback({
           responseMessages,
           streamErrorMessage,
@@ -1567,6 +1743,71 @@ export async function runAgent(options: {
   });
 
   return result;
+}
+
+async function resolveNonStreamingFinalText(options: {
+  generatedText: string;
+  responseMessages: ModelMessage[];
+  model: Parameters<typeof generateText>[0]["model"];
+  systemPrompt: string;
+  messages: ModelMessage[];
+  tools: ToolSet;
+  provider?: string;
+  providerOptions?: Parameters<typeof generateText>[0]["providerOptions"];
+  temperature?: number;
+  maxOutputTokens?: number;
+}): Promise<{ finalText: string; allResponseMessages: ModelMessage[] }> {
+  let allResponseMessages = [...options.responseMessages];
+  const responseToolText = getLastResponseToolText(allResponseMessages).trim();
+  const assistantText = getLastAssistantText(allResponseMessages).trim();
+  let resolvedText = options.generatedText.trim() || responseToolText || assistantText;
+
+  if (!hasVisibleText(resolvedText) && hasNonResponseToolResult(allResponseMessages)) {
+    for (let round = 0; round < MAX_CONTINUATION_ROUNDS; round++) {
+      const cont = await continueAgentToFinalResponse({
+        model: options.model,
+        systemPrompt: options.systemPrompt,
+        messages: options.messages,
+        responseMessages: allResponseMessages,
+        tools: options.tools,
+        provider: options.provider,
+        providerOptions: options.providerOptions,
+        temperature: options.temperature,
+        maxOutputTokens: options.maxOutputTokens,
+      });
+
+      if (cont.extraMessages.length > 0) {
+        allResponseMessages = [...allResponseMessages, ...cont.extraMessages];
+      }
+
+      const currentResponseToolText = getLastResponseToolText(allResponseMessages).trim();
+      const currentAssistantText = getLastAssistantText(allResponseMessages).trim();
+      resolvedText =
+        cont.finalText ||
+        currentResponseToolText ||
+        currentAssistantText ||
+        cont.textMessage;
+
+      if (hasVisibleText(resolvedText)) {
+        break;
+      }
+    }
+  }
+
+  if (!hasVisibleText(resolvedText)) {
+    const lastToolResult = getLastNonResponseToolResult(allResponseMessages);
+    if (lastToolResult?.text) {
+      const toolHeader = lastToolResult.toolName
+        ? `**Результат выполнения (${lastToolResult.toolName}):**\n\n`
+        : "";
+      resolvedText = `${toolHeader}${lastToolResult.text.trim()}`;
+    }
+  }
+
+  return {
+    finalText: resolvedText.trim() || "Не удалось сформировать ответ. Попробуйте повторить запрос.",
+    allResponseMessages,
+  };
 }
 
 /**
@@ -1678,14 +1919,20 @@ export async function runAgentText(options: {
       generated as unknown as { response?: { messages?: ModelMessage[] } }
     ).response?.messages;
 
-    const text = generated.text ?? "";
-    const fallbackReply =
-      Array.isArray(responseMessages) && responseMessages.length > 0
-        ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
-        : "";
-    const finalText = text.trim() ? text : fallbackReply;
-    const safeFinalText =
-      finalText.trim() || "Не удалось сформировать ответ. Попробуйте повторить запрос.";
+    const initialResponseMessages = Array.isArray(responseMessages) ? responseMessages : [];
+    const { finalText: safeFinalText, allResponseMessages } =
+      await resolveNonStreamingFinalText({
+        generatedText: generated.text ?? "",
+        responseMessages: initialResponseMessages,
+        model,
+        systemPrompt,
+        messages,
+        tools,
+        provider: effectiveModel.provider,
+        providerOptions,
+        temperature: effectiveModel.temperature,
+        maxOutputTokens: effectiveModel.maxTokens,
+      });
 
     try {
       const latest = await getChat(options.chatId);
@@ -1698,8 +1945,8 @@ export async function runAgentText(options: {
           createdAt: now,
         });
 
-        if (Array.isArray(responseMessages) && responseMessages.length > 0) {
-          for (const msg of responseMessages) {
+        if (allResponseMessages.length > 0) {
+          for (const msg of allResponseMessages) {
             latest.messages.push(...convertModelMessageToChatMessages(msg, now));
           }
         } else {
@@ -1771,12 +2018,20 @@ export async function runAgentText(options: {
             generated as unknown as { response?: { messages?: ModelMessage[] } }
           ).response?.messages;
 
-          const text = generated.text ?? "";
-          const fallbackReply =
-            Array.isArray(responseMessages) && responseMessages.length > 0
-              ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
-              : "";
-          const finalText = text.trim() ? text : fallbackReply;
+          const initialFallbackMessages = Array.isArray(responseMessages) ? responseMessages : [];
+          const { finalText, allResponseMessages } =
+            await resolveNonStreamingFinalText({
+              generatedText: generated.text ?? "",
+              responseMessages: initialFallbackMessages,
+              model: fallbackModel,
+              systemPrompt,
+              messages,
+              tools,
+              provider: fallbackConfig.provider,
+              providerOptions: fallbackProviderOptions,
+              temperature: fallbackConfig.temperature,
+              maxOutputTokens: fallbackConfig.maxTokens,
+            });
 
           modelCircuitBreaker.recordSuccess(fallbackBreakerKey);
 
@@ -1791,8 +2046,8 @@ export async function runAgentText(options: {
                 createdAt: now,
               });
 
-              if (Array.isArray(responseMessages) && responseMessages.length > 0) {
-                for (const msg of responseMessages) {
+              if (allResponseMessages.length > 0) {
+                for (const msg of allResponseMessages) {
                   latest.messages.push(...convertModelMessageToChatMessages(msg, now));
                 }
               } else {
@@ -1848,12 +2103,20 @@ export async function runAgentText(options: {
           generated as unknown as { response?: { messages?: ModelMessage[] } }
         ).response?.messages;
 
-        const text = generated.text ?? "";
-        const fallbackReply =
-          Array.isArray(responseMessages) && responseMessages.length > 0
-            ? getLastResponseToolText(responseMessages) || getLastAssistantText(responseMessages)
-            : "";
-        const finalText = text.trim() ? text : fallbackReply;
+        const initialRetryMessages = Array.isArray(responseMessages) ? responseMessages : [];
+        const { finalText, allResponseMessages } =
+          await resolveNonStreamingFinalText({
+            generatedText: generated.text ?? "",
+            responseMessages: initialRetryMessages,
+            model,
+            systemPrompt,
+            messages: retryMessages,
+            tools,
+            provider: effectiveModel.provider,
+            providerOptions,
+            temperature: effectiveModel.temperature,
+            maxOutputTokens: effectiveModel.maxTokens,
+          });
 
         modelCircuitBreaker.recordSuccess(primaryBreakerKey);
 
@@ -1868,8 +2131,8 @@ export async function runAgentText(options: {
               createdAt: now,
             });
 
-            if (Array.isArray(responseMessages) && responseMessages.length > 0) {
-              for (const msg of responseMessages) {
+            if (allResponseMessages.length > 0) {
+              for (const msg of allResponseMessages) {
                 latest.messages.push(...convertModelMessageToChatMessages(msg, now));
               }
             } else {

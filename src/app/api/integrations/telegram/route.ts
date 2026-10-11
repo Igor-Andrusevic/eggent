@@ -552,9 +552,13 @@ function extractAccessCodeCandidate(text: string): string | null {
 
 function normalizeOutgoingText(text: string): { text: string; parseMode?: string } {
   const value = text.trim();
-  if (!value) return { text: "Пустой ответ от агента." };
+  if (!value) return { text: "Не удалось сформировать текстовый ответ. Попробуйте повторить или уточнить запрос." };
   const html = formatTelegramReply(value);
-  if (!html) return { text: "Пустой ответ от агента." };
+  if (!html) {
+    return {
+      text: value.length <= TELEGRAM_TEXT_LIMIT ? value : `${value.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`,
+    };
+  }
   return { text: html, parseMode: "HTML" };
 }
 
@@ -591,7 +595,7 @@ async function sendTelegramMessage(
     const errMsg = `Telegram sendMessage failed (${response.status})${payload?.description ? `: ${payload.description}` : ""}`;
     if (payload?.description?.includes("can't parse entities")) {
       console.warn("Telegram HTML parse error, retrying as plain text:", payload.description);
-      const plainText = text.trim() || "Пустой ответ от агента.";
+      const plainText = text.trim() || "Не удалось сформировать текстовый ответ. Попробуйте повторить запрос.";
       const fallbackBody: Record<string, unknown> = {
         chat_id: chatId,
         text: plainText.length <= TELEGRAM_TEXT_LIMIT ? plainText : `${plainText.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`,
@@ -1279,6 +1283,20 @@ export async function POST(req: NextRequest) {
         await sendTelegramChatAction(botToken, chatId, "typing");
       }, 4000); // Refresh every 4 seconds (Telegram typing indicator lasts ~5 seconds)
 
+      let intermediateTimer: NodeJS.Timeout | null = null;
+      intermediateTimer = setTimeout(async () => {
+        try {
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            "⏳ Выполняю задачу, это может занять некоторое время...",
+            messageId
+          );
+        } catch {
+          // non-critical
+        }
+      }, 7000);
+
       try {
         // For voice messages, add special marker so agent knows to use knowledge_query
         const isVoiceMessage = incomingSavedFile?.name?.startsWith('voice-') && incomingSavedFile?.name?.endsWith('.ogg');
@@ -1314,11 +1332,13 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        if (intermediateTimer) clearTimeout(intermediateTimer);
         clearInterval(typingInterval);
         // Don't reply to old message - just send the response
         await sendTelegramMessage(botToken, chatId, result.reply);
         return Response.json({ ok: true });
       } catch (error) {
+        if (intermediateTimer) clearTimeout(intermediateTimer);
         clearInterval(typingInterval);
         throw error;
       }

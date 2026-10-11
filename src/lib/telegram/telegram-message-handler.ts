@@ -430,7 +430,7 @@ function extractAccessCodeCandidate(text: string): string | null {
 
 function normalizeOutgoingText(text: string): string {
     const value = text.trim();
-    if (!value) return "Пустой ответ от агента.";
+    if (!value) return "Не удалось сформировать текстовый ответ. Попробуйте повторить или уточнить запрос.";
     if (value.length <= TELEGRAM_TEXT_LIMIT) return value;
     return `${value.slice(0, TELEGRAM_TEXT_LIMIT - 1)}…`;
 }
@@ -673,6 +673,20 @@ export async function processTelegramUpdate(
             return { ok: true, ignored: true, reason: "non_text" };
         }
 
+        let intermediateTimer: NodeJS.Timeout | null = null;
+        intermediateTimer = setTimeout(async () => {
+            try {
+                await sendTelegramMessage(
+                    botToken,
+                    chatId,
+                    "⏳ Выполняю задачу, это может занять некоторое время...",
+                    messageId
+                );
+            } catch {
+                // non-critical
+            }
+        }, 7000);
+
         try {
             const result = await handleExternalMessage({
                 sessionId,
@@ -691,9 +705,11 @@ export async function processTelegramUpdate(
                 },
             });
 
+            if (intermediateTimer) clearTimeout(intermediateTimer);
             await sendTelegramMessage(botToken, chatId, result.reply, messageId);
             return { ok: true };
         } catch (error) {
+            if (intermediateTimer) clearTimeout(intermediateTimer);
             if (error instanceof ExternalMessageError) {
                 const errorMessage =
                     typeof error.payload.error === "string"

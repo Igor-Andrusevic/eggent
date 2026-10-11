@@ -217,64 +217,6 @@ function formatChatErrorMessage(error: unknown): string {
   return compact.length > 280 ? `${compact.slice(0, 280)}...` : compact;
 }
 
-function normalizeVisibleText(text: string): string {
-  return text.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim();
-}
-
-function extractVisibleAssistantText(message: UIMessage): string {
-  if (message.role !== "assistant") return "";
-
-  const text = message.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("\n");
-  const normalizedText = normalizeVisibleText(text);
-  if (normalizedText) return normalizedText;
-
-  const responseToolText = message.parts
-    .map((part) => {
-      if (part.type === "dynamic-tool") {
-        const dp = part as {
-          toolName?: string;
-          state?: string;
-          output?: unknown;
-        };
-        if (dp.toolName !== "response" || dp.state !== "output-available") return "";
-        return typeof dp.output === "string" ? dp.output : JSON.stringify(dp.output ?? "");
-      }
-
-      if (!part.type.startsWith("tool-")) return "";
-      const tp = part as {
-        type: string;
-        state?: string;
-        output?: unknown;
-      };
-      const toolName = tp.type.replace("tool-", "");
-      if (toolName !== "response" || tp.state !== "output-available") return "";
-      return typeof tp.output === "string" ? tp.output : JSON.stringify(tp.output ?? "");
-    })
-    .filter(Boolean)
-    .join("\n");
-
-  return normalizeVisibleText(responseToolText);
-}
-
-function assistantMessageHasToolOutput(message: UIMessage): boolean {
-  if (message.role !== "assistant") return false;
-  return message.parts.some((part) => {
-    if (part.type === "dynamic-tool") {
-      const dp = part as { state?: string };
-      return dp.state === "output-available" || dp.state === "output-error";
-    }
-    if (!part.type.startsWith("tool-")) return false;
-    const tp = part as { state?: string };
-    return tp.state === "output-available" || tp.state === "output-error";
-  });
-}
-
-const NO_FINAL_RESPONSE_FALLBACK =
-  "Инструменты выполнились, но финальный ответ не получен. Напишите `continue`, и я завершу ответ.";
-
 export function ChatPanel() {
   const {
     activeChatId,
@@ -452,15 +394,6 @@ export function ChatPanel() {
     const latestAssistant = [...recentMessages]
       .reverse()
       .find((m) => m.role === "assistant");
-    const assistantMessages = recentMessages.filter(
-      (m): m is UIMessage => m.role === "assistant"
-    );
-    const hasToolOutput = assistantMessages.some((m) =>
-      assistantMessageHasToolOutput(m)
-    );
-    const hasVisibleAssistantAnswer = assistantMessages.some((m) =>
-      Boolean(extractVisibleAssistantText(m))
-    );
 
     if (latestAssistant) {
       for (let idx = 0; idx < latestAssistant.parts.length; idx++) {
@@ -493,26 +426,6 @@ export function ChatPanel() {
     }
 
     if (status === "ready" || status === "error") {
-      const hasMissingAnswer =
-        (hasToolOutput && !hasVisibleAssistantAnswer) ||
-        (assistantMessages.length > 0 && !hasVisibleAssistantAnswer);
-      if (hasMissingAnswer) {
-        const alreadyPresent = assistantMessages.some(
-          (m) => extractVisibleAssistantText(m) === NO_FINAL_RESPONSE_FALLBACK
-        );
-        setChatError(NO_FINAL_RESPONSE_FALLBACK);
-        if (!alreadyPresent) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: generateClientId(),
-              role: "assistant",
-              parts: [{ type: "text", text: NO_FINAL_RESPONSE_FALLBACK }],
-            },
-          ]);
-        }
-      }
-
       const queued = queuedSwitchResultRef.current;
       const shouldRefresh = shouldRefreshProjectsRef.current || Boolean(queued);
       pendingProjectSwitchRef.current = false;
