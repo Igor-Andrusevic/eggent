@@ -36,6 +36,7 @@ import {
 } from "@/lib/storage/external-session-store";
 import { getAllProjects } from "@/lib/storage/project-store";
 import { formatTelegramReply } from "@/lib/utils/telegram-format";
+import { sendTelegramReplyWithFiles } from "@/lib/telegram/telegram-sender";
 import {
   canUserAccessProject,
   getAccessibleProjects,
@@ -1334,8 +1335,8 @@ export async function POST(req: NextRequest) {
 
         if (intermediateTimer) clearTimeout(intermediateTimer);
         clearInterval(typingInterval);
-        // Don't reply to old message - just send the response
-        await sendTelegramMessage(botToken, chatId, result.reply);
+        // Send response and attached code files
+        await sendTelegramReplyWithFiles(botToken, chatId, result.reply);
         return Response.json({ ok: true });
       } catch (error) {
         if (intermediateTimer) clearTimeout(intermediateTimer);

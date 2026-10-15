@@ -400,6 +400,15 @@ function applyGlobalToolLoopGuard(tools: ToolSet): ToolSet {
  * Convert stored ChatMessages to AI SDK ModelMessage format
  */
 /**
+ * Helper to identify Gemini-compatible models across any provider (including cliproxy).
+ */
+function isGeminiLike(provider?: string, model?: string): boolean {
+  const p = (provider || "").toLowerCase();
+  const m = (model || "").toLowerCase();
+  return p === "google" || p === "zhipuai" || m.includes("gemini") || p.includes("gemini");
+}
+
+/**
  * Validate and fix function call ordering for Gemini
  * Gemini requires: tool-call -> tool-result -> tool-call -> tool-result
  * If order is broken, filter out the problematic messages
@@ -642,7 +651,7 @@ function cleanOrphanedToolMessages(messages: ModelMessage[]): ModelMessage[] {
   return result;
 }
 
-function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string): ModelMessage[] {
+function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: string, model?: string): ModelMessage[] {
   let result: ModelMessage[] = [];
 
   for (const m of messages) {
@@ -690,7 +699,7 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: 
   }
 
   result = cleanOrphanedToolMessages(result);
-  if (provider === "google" || provider === "zhipuai") {
+  if (isGeminiLike(provider, model)) {
     return validateAndFixGeminiToolOrdering(result);
   }
 
@@ -997,6 +1006,7 @@ async function continueAgentToFinalResponse(options: {
   responseMessages: ModelMessage[];
   tools: ToolSet;
   provider?: string;
+  modelName?: string;
   providerOptions?: Parameters<typeof generateText>[0]["providerOptions"];
   temperature?: number;
   maxOutputTokens?: number;
@@ -1009,7 +1019,7 @@ async function continueAgentToFinalResponse(options: {
       ...options.responseMessages,
     ]);
 
-    if (options.provider === "google" || options.provider === "zhipuai") {
+    if (isGeminiLike(options.provider, options.modelName)) {
       cleanedHistory = validateAndFixGeminiToolOrdering(cleanedHistory);
     }
 
@@ -1208,12 +1218,14 @@ export async function runAgent(options: {
   const chat = await getChat(options.chatId);
   if (chat) {
     // Convert stored messages to ModelMessage format (including tool calls/results)
-    const allMessages = convertChatMessagesToModelMessages(chat.messages, settings.chatModel.provider);
+    const allMessages = convertChatMessagesToModelMessages(
+      chat.messages,
+      settings.chatModel.provider,
+      settings.chatModel.model
+    );
 
-    // Use shorter history for Gemini and Zhipu to avoid function ordering issues
-    // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
-    // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
-    const needsStrictOrdering = settings.chatModel.provider === "google" || settings.chatModel.provider === "zhipuai";
+    // Use shorter history for Gemini models across any provider (including cliproxy)
+    const needsStrictOrdering = isGeminiLike(settings.chatModel.provider, settings.chatModel.model);
     const historyLimit = needsStrictOrdering ? 50 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
@@ -1585,6 +1597,7 @@ export async function runAgent(options: {
               responseMessages,
               tools,
               provider: settings.chatModel.provider,
+              modelName: settings.chatModel.model,
               providerOptions,
               temperature: settings.chatModel.temperature,
               maxOutputTokens: settings.chatModel.maxTokens,
@@ -1664,6 +1677,7 @@ export async function runAgent(options: {
             responseMessages,
             tools,
             provider: settings.chatModel.provider,
+            modelName: settings.chatModel.model,
             providerOptions,
             temperature: settings.chatModel.temperature,
             maxOutputTokens: settings.chatModel.maxTokens,
@@ -1753,6 +1767,7 @@ async function resolveNonStreamingFinalText(options: {
   messages: ModelMessage[];
   tools: ToolSet;
   provider?: string;
+  modelName?: string;
   providerOptions?: Parameters<typeof generateText>[0]["providerOptions"];
   temperature?: number;
   maxOutputTokens?: number;
@@ -1771,6 +1786,7 @@ async function resolveNonStreamingFinalText(options: {
         responseMessages: allResponseMessages,
         tools: options.tools,
         provider: options.provider,
+        modelName: options.modelName,
         providerOptions: options.providerOptions,
         temperature: options.temperature,
         maxOutputTokens: options.maxOutputTokens,
@@ -1846,12 +1862,14 @@ export async function runAgentText(options: {
 
   const chat = await getChat(options.chatId);
   if (chat) {
-    const allMessages = convertChatMessagesToModelMessages(chat.messages, effectiveModel.provider);
+    const allMessages = convertChatMessagesToModelMessages(
+      chat.messages,
+      effectiveModel.provider,
+      effectiveModel.model
+    );
 
-    // Use shorter history for Gemini and Zhipu to avoid function ordering issues
-    // Reduced to 25 because each assistant message with tool calls splits into 2+ messages
-    // This prevents API 400 errors: "function call turn must come immediately after user/function response turn"
-    const needsStrictOrdering = effectiveModel.provider === "google" || effectiveModel.provider === "zhipuai";
+    // Use shorter history for Gemini models across any provider (including cliproxy)
+    const needsStrictOrdering = isGeminiLike(effectiveModel.provider, effectiveModel.model);
     const historyLimit = needsStrictOrdering ? 25 : 100;
     const history = new History(historyLimit);
     history.addMany(allMessages);
@@ -1886,6 +1904,7 @@ export async function runAgentText(options: {
     tools: toolNames,
     userTimezone: context.data?.userTimezone as string | undefined,
     userLocale: context.data?.userLocale as string | undefined,
+    isTelegram: Boolean(context.data?.telegram),
   });
 
   const messages: ModelMessage[] = [
@@ -1929,6 +1948,7 @@ export async function runAgentText(options: {
         messages,
         tools,
         provider: effectiveModel.provider,
+        modelName: effectiveModel.model,
         providerOptions,
         temperature: effectiveModel.temperature,
         maxOutputTokens: effectiveModel.maxTokens,
@@ -2028,6 +2048,7 @@ export async function runAgentText(options: {
               messages,
               tools,
               provider: fallbackConfig.provider,
+              modelName: fallbackConfig.model,
               providerOptions: fallbackProviderOptions,
               temperature: fallbackConfig.temperature,
               maxOutputTokens: fallbackConfig.maxTokens,
@@ -2113,6 +2134,7 @@ export async function runAgentText(options: {
             messages: retryMessages,
             tools,
             provider: effectiveModel.provider,
+            modelName: effectiveModel.model,
             providerOptions,
             temperature: effectiveModel.temperature,
             maxOutputTokens: effectiveModel.maxTokens,

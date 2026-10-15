@@ -15,6 +15,75 @@ function formatChatStreamError(error: unknown): string {
   return `Generation failed after tool execution: ${short}`;
 }
 
+const SSE_HEARTBEAT_INTERVAL_MS = 15000;
+
+function withSseHeartbeat(
+  stream: ReadableStream<Uint8Array>,
+  intervalMs = SSE_HEARTBEAT_INTERVAL_MS
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const reader = stream.getReader();
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          if (timer) {
+            clearInterval(timer);
+            timer = undefined;
+          }
+        }
+      }, intervalMs);
+
+      const pump = (): void => {
+        reader
+          .read()
+          .then(({ done, value }) => {
+            if (done) {
+              if (timer) {
+                clearInterval(timer);
+                timer = undefined;
+              }
+              try {
+                controller.close();
+              } catch {
+                // already closed
+              }
+              return;
+            }
+            if (value) {
+              controller.enqueue(value);
+            }
+            pump();
+          })
+          .catch((error) => {
+            if (timer) {
+              clearInterval(timer);
+              timer = undefined;
+            }
+            try {
+              controller.error(error);
+            } catch {
+              // already errored or closed
+            }
+          });
+      };
+
+      pump();
+    },
+    cancel(reason) {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      return reader.cancel(reason);
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureCronSchedulerStarted();
@@ -68,14 +137,25 @@ export async function POST(req: NextRequest) {
       userLocale: typeof userLocale === "string" ? userLocale : undefined,
     });
 
-    return result.toUIMessageStreamResponse({
+    const uiResponse = result.toUIMessageStreamResponse({
       headers: {
         "X-Chat-Id": resolvedChatId,
+        "Cache-Control": "no-cache, no-transform",
       },
       onError: (error) => {
         console.error("Chat stream response error:", error);
         return formatChatStreamError(error);
       },
+    });
+
+    if (!uiResponse.body) {
+      return uiResponse;
+    }
+
+    return new Response(withSseHeartbeat(uiResponse.body), {
+      status: uiResponse.status,
+      statusText: uiResponse.statusText,
+      headers: uiResponse.headers,
     });
   } catch (error) {
     console.error("Chat API error:", error);

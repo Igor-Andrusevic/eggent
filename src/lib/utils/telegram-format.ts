@@ -213,3 +213,94 @@ export function formatTelegramReply(text: string): string {
   const html = markdownToTelegramHtml(text);
   return truncateTelegramHtml(html);
 }
+
+export interface ExtractedTelegramFile {
+  filename: string;
+  content: string;
+  language?: string;
+}
+
+export function extractCodeFilesForTelegram(markdown: string): {
+  files: ExtractedTelegramFile[];
+  cleanedMarkdown: string;
+} {
+  if (!markdown || !markdown.trim()) {
+    return { files: [], cleanedMarkdown: "" };
+  }
+
+  const files: ExtractedTelegramFile[] = [];
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g;
+
+  let fileIndex = 0;
+  const cleanedMarkdown = markdown.replace(codeBlockRegex, (match, rawLang, code) => {
+    const trimmedCode = (code || "").trim();
+    const lang = (rawLang || "").toLowerCase();
+
+    // Only extract as separate file if code is substantial (>= 300 chars) or if total message is large
+    if (trimmedCode.length < 300 && markdown.length < 3000) {
+      return match;
+    }
+
+    fileIndex += 1;
+    let filename = "";
+
+    // 1. Check SQL procedure, view, function, table
+    const sqlProcMatch = trimmedCode.match(
+      /CREATE\s+(?:OR\s+ALTER\s+)?(?:PROCEDURE|PROC|FUNCTION|VIEW|TABLE|TRIGGER)\s+\[?(?:[a-zA-Z0-9_]+\s*\]?\s*\.\s*\[?)?([a-zA-Z0-9_]+)\]?/i
+    );
+    if (sqlProcMatch?.[1]) {
+      filename = `${sqlProcMatch[1]}.sql`;
+    } else {
+      // 2. Check comment header with filename
+      const commentFileMatch = trimmedCode.match(/(?:--|\/\/|#)\s*(?:filename|file):\s*([a-zA-Z0-9_.-]+)/i);
+      if (commentFileMatch?.[1]) {
+        filename = commentFileMatch[1];
+      } else {
+        // 3. Fallback by language
+        const extMap: Record<string, string> = {
+          sql: "sql",
+          python: "py",
+          py: "py",
+          javascript: "js",
+          js: "js",
+          typescript: "ts",
+          ts: "ts",
+          json: "json",
+          html: "html",
+          css: "css",
+          sh: "sh",
+          bash: "sh",
+        };
+        const ext = extMap[lang] || (trimmedCode.includes("SELECT") || trimmedCode.includes("CREATE") ? "sql" : "txt");
+        filename = fileIndex === 1 ? `script.${ext}` : `script_${fileIndex}.${ext}`;
+      }
+    }
+
+    files.push({
+      filename,
+      content: trimmedCode,
+      language: lang || undefined,
+    });
+
+    // If code is long (> 800 chars), replace with a preview block and file attachment indicator
+    if (trimmedCode.length > 800) {
+      const lines = trimmedCode.split("\n");
+      const previewLines = lines.slice(0, 10).join("\n");
+      const suffix = lines.length > 10 ? `\n-- ... (${lines.length - 10} строк опущено, полный код в файле ${filename})` : "";
+      return `\`\`\`${lang}\n-- 📄 Полный готовый код в прикреплённом файле: ${filename}\n${previewLines}${suffix}\n\`\`\``;
+    }
+
+    return match;
+  });
+
+  // If message is still longer than 3800 chars and no files were extracted, attach whole message as txt
+  if (files.length === 0 && markdown.length > 3800) {
+    files.push({
+      filename: "response.txt",
+      content: markdown,
+      language: "text",
+    });
+  }
+
+  return { files, cleanedMarkdown };
+}

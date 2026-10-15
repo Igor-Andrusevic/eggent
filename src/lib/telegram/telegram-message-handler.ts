@@ -26,6 +26,7 @@ import {
     saveExternalSession,
 } from "@/lib/storage/external-session-store";
 import { getAllProjects } from "@/lib/storage/project-store";
+import { sendTelegramReplyWithFiles } from "@/lib/telegram/telegram-sender";
 import crypto from "node:crypto";
 
 const TELEGRAM_TEXT_LIMIT = 4096;
@@ -706,7 +707,7 @@ export async function processTelegramUpdate(
             });
 
             if (intermediateTimer) clearTimeout(intermediateTimer);
-            await sendTelegramMessage(botToken, chatId, result.reply, messageId);
+            await sendTelegramReplyWithFiles(botToken, chatId, result.reply, messageId);
             return { ok: true };
         } catch (error) {
             if (intermediateTimer) clearTimeout(intermediateTimer);

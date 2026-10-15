@@ -72,6 +72,7 @@ export async function buildSystemPrompt(options: {
   tools?: string[];
   userTimezone?: string;
   userLocale?: string;
+  isTelegram?: boolean;
 }): Promise<string> {
   const parts: string[] = [];
 
@@ -91,6 +92,17 @@ export async function buildSystemPrompt(options: {
       ? "You are the primary agent communicating directly with the user."
       : `You are a subordinate agent (level ${agentNum}), delegated a task by Agent ${agentNum - 1}.`)
   );
+
+  // 2.1 Telegram delivery instructions
+  if (options.isTelegram) {
+    parts.push(
+      `\n## Telegram Delivery Rules:\n` +
+      `- The user is communicating via Telegram.\n` +
+      `- When providing SQL procedures, scripts, code, or large analytical files, always provide the complete, unabbreviated production-ready code in standard markdown code blocks.\n` +
+      `- The system will automatically package any substantial code blocks into ready-to-run files and deliver them directly into Telegram as downloadable attachments.\n` +
+      `- Never omit code or write placeholders like "-- rest of code goes here". Write the full complete implementation.\n`
+    );
+  }
 
   // 3. Tool prompts
   if (options.tools && options.tools.length > 0) {
