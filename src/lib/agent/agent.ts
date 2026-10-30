@@ -12,6 +12,8 @@ import { createModel } from "@/lib/providers/llm-provider";
 import { buildSystemPrompt } from "@/lib/agent/prompts";
 import { getSettings } from "@/lib/storage/settings-store";
 import { getChat, saveChat } from "@/lib/storage/chat-store";
+import { getProject } from "@/lib/storage/project-store";
+import { runPipelineStream, runPipelineText } from "@/lib/agent/pipeline";
 import { createAgentTools } from "@/lib/tools/tool";
 import { getProjectMcpTools } from "@/lib/mcp/client";
 import type { AgentContext } from "@/lib/agent/types";
@@ -30,7 +32,7 @@ const MAX_CONTINUATION_STEPS = 25;
 const POLL_NO_PROGRESS_BLOCK_THRESHOLD = 16;
 const POLL_BACKOFF_SCHEDULE_MS = [5000, 10000, 30000, 60000] as const;
 
-function resolveModelProviderOptions(provider: string) {
+export function resolveModelProviderOptions(provider: string) {
   if (provider === "codex-cli") {
     return {
       openai: {
@@ -710,7 +712,7 @@ function convertChatMessagesToModelMessages(messages: ChatMessage[], provider?: 
  * Convert AI SDK ModelMessage to our ChatMessage format for storage.
  * Tool messages can contain multiple tool results, so this returns an array.
  */
-function convertModelMessageToChatMessages(msg: ModelMessage, now: string): ChatMessage[] {
+export function convertModelMessageToChatMessages(msg: ModelMessage, now: string): ChatMessage[] {
   if (msg.role === "tool") {
     // Tool result - AI SDK may include multiple tool-result parts in one message.
     const content = Array.isArray(msg.content) ? msg.content : [];
@@ -805,7 +807,7 @@ function convertModelMessageToChatMessages(msg: ModelMessage, now: string): Chat
 
 const ENABLE_VERBOSE_LOGGING = process.env.EGGENT_VERBOSE_LOG === "true";
 
-function logLLMRequest(options: {
+export function logLLMRequest(options: {
   model: string;
   system: string;
   messages: ModelMessage[];
@@ -863,7 +865,7 @@ function extractAssistantText(msg: ModelMessage): string {
   return text;
 }
 
-function getLastAssistantText(messages: ModelMessage[]): string {
+export function getLastAssistantText(messages: ModelMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
@@ -912,7 +914,7 @@ function extractToolResultOutputText(output: unknown): string {
   }
 }
 
-function getLastResponseToolText(messages: ModelMessage[]): string {
+export function getLastResponseToolText(messages: ModelMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
 
@@ -1364,6 +1366,27 @@ export async function runAgent(options: {
       await mcpCleanup();
     } catch {
       // non-critical
+    }
+  }
+
+  // Check if project has an enabled multi-agent pipeline
+  if (options.projectId) {
+    const project = await getProject(options.projectId);
+    if (project?.pipeline?.enabled && project.pipeline.steps?.length > 0) {
+      return runPipelineStream({
+        project,
+        pipeline: project.pipeline,
+        chatId: options.chatId,
+        userMessage: options.userMessage,
+        currentPath: options.currentPath,
+        settings,
+        tools,
+        baseSystemPrompt: systemPrompt,
+        historyMessages: context.history,
+        ensureUserMessageSaved,
+        persistAssistantTurn,
+        cleanupMcpIfNeeded,
+      });
     }
   }
 
@@ -1907,6 +1930,26 @@ export async function runAgentText(options: {
     isTelegram: Boolean(context.data?.telegram),
   });
 
+  // Check if project has an enabled multi-agent pipeline
+  if (options.projectId) {
+    const project = await getProject(options.projectId);
+    if (project?.pipeline?.enabled && project.pipeline.steps?.length > 0) {
+      return runPipelineText({
+        project,
+        pipeline: project.pipeline,
+        chatId: options.chatId,
+        userMessage: options.userMessage,
+        currentPath: options.currentPath,
+        runtimeData: options.runtimeData,
+        settings,
+        tools,
+        baseSystemPrompt: systemPrompt,
+        historyMessages: context.history,
+        effectiveModel,
+      });
+    }
+  }
+
   const messages: ModelMessage[] = [
     ...context.history,
     { role: "user", content: options.userMessage },
@@ -2219,10 +2262,10 @@ export async function runSubordinateAgent(options: {
     chatId: `subordinate-${Date.now()}`,
     projectId: options.projectId,
     memorySubdir: options.projectId
-      ? `projects/${options.projectId}`
+      ? `${options.projectId}`
       : "main",
     knowledgeSubdirs: options.projectId
-      ? [`projects/${options.projectId}`, "main"]
+      ? [`${options.projectId}`, "main"]
       : ["main"],
     history: [],
     agentNumber: options.parentAgentNumber + 1,

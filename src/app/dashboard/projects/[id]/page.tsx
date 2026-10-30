@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { KnowledgeSection } from "@/components/knowledge-section";
 import { ProjectContextSection } from "@/components/project-context-section";
+import { ProjectPipelineSection } from "@/components/project-pipeline-section";
 import { CronSection } from "@/components/cron-section";
 import type { Project } from "@/lib/types";
 
@@ -178,6 +179,12 @@ export default function ProjectDetailsPage() {
                                     </Button>
                                 </div>
                             </div>
+
+                            {/* Multi-Agent Pipeline */}
+                            <ProjectPipelineSection
+                                project={project}
+                                onUpdate={(updated) => setProject(updated)}
+                            />
 
                             {/* MCP + Skills */}
                             <ProjectContextSection projectId={project.id} />

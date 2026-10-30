@@ -136,12 +136,36 @@ export interface ChatFile {
 
 // --- Projects ---
 
+export interface PipelineLoopBack {
+  toStepId: string;
+  triggerPattern?: string; // Regex pattern to trigger loopBack, e.g. "VERDICT:\\s*REVISE"
+  maxRounds?: number; // Default 1
+}
+
+export interface PipelineStep {
+  id: string;
+  name: string;
+  description?: string;
+  model?: ModelConfig;
+  systemPrompt?: string;
+  skillName?: string;
+  temperature?: number;
+  maxTokens?: number;
+  loopBack?: PipelineLoopBack;
+}
+
+export interface PipelineConfig {
+  enabled: boolean;
+  steps: PipelineStep[];
+}
+
 export interface Project {
   id: string;
   name: string;
   description: string;
   instructions: string;
   memoryMode: "global" | "isolated";
+  pipeline?: PipelineConfig;
   createdAt: string;
   updatedAt: string;
 }
